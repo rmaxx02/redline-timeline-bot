@@ -64,4 +64,4 @@ async def on_message(msg):
     await bot.process_commands(msg)
 
 # 5. Core Application Passport Credential Key
-bot.run('MTUONjg2Mjc1MTA1ODQ3MDY1Mg.GWbtrg.62XoRH-qg7v12iB_bHNXST-yq0VTLbaG_zUeSY')
+bot.run('MTU0Njg2Mjc1MTA5ODQ3ODY1Mg.GA_VDx.Spo1fSXk4zVVJlHmDj2kowjzNcxgl26ATjpHaQ')
