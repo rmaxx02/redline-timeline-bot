@@ -214,4 +214,4 @@ async def on_message(msg):
 
     await bot.process_commands(msg)
 
-bot.run('MTU0Njg2Mjc1MTA5ODQ3ODY1Mg.GKxOw6.QuDKh_y1nVPobt3GXYix9r81pofCvTOnf75CgY')
+bot.run('MTU0Njg2Mjc1MTA5ODQ3ODY1Mg.GojeT_.rEQEJS-wvaSq8UHAlW2BixxPKV0sSRqt9V8Edw')
