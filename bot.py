@@ -59,8 +59,23 @@ async def on_member_join(member):
     welcome_ch = bot.get_channel(WELCOME_CH_ID)
     if welcome_ch:
         embed = discord.Embed(
-            title="🏁 WELCOME TO THE REDLINE MATRIX 🏁",
-            description=f"Welcome {member.mention} to the ultimate roleplay tracking grid!",
+            title="🏁 WELCOME TO THE REDLINE MATRIX TRACKER 🏁",
+            description=(
+                "Welcome to the ultimate multi-POV roleplay tracking network!\n\n"
+                "📌 **SERVER REQUISITE GUIDELINES:**\n"
+                "1. **Keep Timelines Accurate:** Do not post fake timestamps or spoilers.\n"
+                "2. **Respect the Streamers:** Toxicity or hate speech results in an instant ban.\n"
+                "3. **Separate IC from OOC:** Keep real-world drama completely out of this server.\n"
+                "4. **Follow Discord ToS:** No illegal links or malicious behavior.\n"
+                "5. **Keyword Scan Optimization:** Include keywords like 'war', 'heist', or 'court' in <#1547061966520979457>!\n\n"
+                "🏆 **PROGRESSION MILESTONE MARGINS:**\n"
+                "• Opie Track: Grease Monkey ➔ Street Racer ➔ Getaway Driver ➔ Wheelman\n"
+                "• Tray Track: Script Kiddie ➔ Green Hat ➔ Elite Hacker ➔ Master Hacker\n"
+                "• Frenchie Track: Lookout ➔ Scout ➔ Infiltrator ➔ Ghost Operator\n\n"
+                "📊 **UTILITY COMMAND PANEL:**\n"
+                "• Type `!stats` anywhere to view your personal scoreboard!\n\n"
+                "👉 Tap the **🔮│get-roles** channel next to pick your streamer team!"
+            ),
             color=0xff0000
         )
         embed.add_field(
