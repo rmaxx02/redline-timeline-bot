@@ -36,6 +36,7 @@ async def on_ready():
     status_rotator.start()
 
 # 🔄 UPGRADE 1: AUTOMATED LIVE STATUS ROTATOR LOOP
+bot.status_index = 0
 @tasks.loop(seconds=15)
 async def status_rotator():
     statuses = [
@@ -44,10 +45,8 @@ async def status_rotator():
         discord.Activity(type=discord.ActivityType.watching, name="🟢 Frenchie's POV (Spotter)"),
         discord.Activity(type=discord.ActivityType.listening, name="!stats commands")
     ]
-    for act in statuses:
-        await bot.change_presence(activity=act)
-        await asyncio.sleep(15)
-
+    await bot.change_presence(activity=statuses[bot.status_index % len(statuses)])
+    bot.status_index += 1
 # 🚀 UPGRADE 2: THE INSTANT JOIN WELCOME TEXT & ROLE ASSIGNER
 @bot.event
 async def on_member_join(member):
@@ -90,7 +89,7 @@ async def stats(ctx):
     await ctx.send(embed=embed)
 
 @bot.command()
-async def trigger_test(ctx, category_choice: str):
+async def trigger_test(ctx, category_choice: str = "war"):
     if ctx.channel.id != LOG_ID:
         await ctx.send("❌ Error: Command must be executed inside your private terminal.")
         return
