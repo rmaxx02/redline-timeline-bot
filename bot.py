@@ -89,43 +89,6 @@ async def stats(ctx):
     embed.set_footer(text="Keep submitting clips to level up your character ranks!")
     await ctx.send(embed=embed)
 
-# 🛠️ MULTI-POV SIMULATION TEST INTERFACE FOR FORUMS
-@bot.command()
-async def trigger_test(ctx, category_choice: str = "war"):
-    if ctx.channel.id != LOG_ID:
-        await ctx.send("❌ Error: Command must be executed inside your private terminal.")
-        return
-
-    choice_lower = category_choice.lower()
-    if choice_lower in ["join", "welcome", "greet"]:
-        await ctx.send("⚡ *Simulating join sequence event handler...*")
-        await on_member_join(ctx.author)
-        return
-    elif "war" in choice_lower or "gang" in choice_lower:
-        tag_label, target_tag_name, box_color = "🔴 GANG WAR LOG", "🔴 Gang War", 0xff0000
-    elif "court" in choice_lower or "case" in choice_lower:
-        tag_label, target_tag_name, box_color = "⚖️ COURT CASE RECORD", "⚖️ Court Case", 0x00f0ff
-    else:
-        tag_label, target_tag_name, box_color = "💰 ACTIVE HEIST TIMELINE", "💰 Heist", 0x39ff14
-
-    await ctx.send(f"⚡ *Ingesting simulated notification... Routing to Forum...*")
-    current_date_prefix = datetime.utcnow().strftime("%Y-%m-%d")
-    epoch_now = int(datetime.utcnow().timestamp())
-    discord_time_string = f"<t:{epoch_now}:F> (<t:{epoch_now}:R>)"
-    
-    embed = discord.Embed(title=f"{tag_label} DETECTED", color=box_color)
-    embed.add_field(name="🎬 Track Perspective", value="[🏎️ Opie (Driver Track)](https://youtube.com)", inline=True)
-    embed.add_field(name="🕒 Log Timestamp", value=discord_time_string, inline=True)
-    embed.add_field(name="📥 Submission Link", value="https://youtube.com", inline=False)
-    embed.add_field(name="👤 Filed By", value=ctx.author.mention, inline=True)
-    
-    forum_channel = bot.get_channel(FORUM_CH_ID)
-    if forum_channel and isinstance(forum_channel, discord.ForumChannel):
-        applied_tags = [t for t in forum_channel.available_tags if t.name == target_tag_name]
-        thread_title = f"[{current_date_prefix}] {tag_label}"
-        await forum_channel.create_thread(name=thread_title, embed=embed, applied_tags=applied_tags)
-        await ctx.send("✅ Success! Simulated post created inside your forum channel.")
-
 # 📋 CHRONOLOGICAL FORUM ROUTING EVENT FILTER
 @bot.event
 async def on_message(msg):
@@ -196,7 +159,7 @@ async def on_message(msg):
                             await msg.channel.send(f"⚡ **RANK UP:** {member.mention} has leveled up to **{rank_name}**! 🟢")
                     break
 
-forum_channel = bot.get_channel(FORUM_CH_ID)
+        forum_channel = bot.get_channel(FORUM_CH_ID)
         if forum_channel and isinstance(forum_channel, discord.ForumChannel):
             applied_tags = [t for t in forum_channel.available_tags if t.name == target_tag_name]
             thread_title = f"[{current_date_prefix}] {tag_label}"
@@ -206,4 +169,4 @@ forum_channel = bot.get_channel(FORUM_CH_ID)
 
     await bot.process_commands(msg)
 
-bot.run('MTU0Njg2Mjc1MTA5ODQ3ODY1Mg.GKxOw6.QuDKh_y1nVPobt3GXYix9r81pofCvTOnf75CgY')
+bot.run('MTU4Njg2Mjc1MTA5ODQ3ODY1Mg.GKxOw6.QuDKh_y1nVPobt3GXYix9r81pofCvTOnf75CgY')
