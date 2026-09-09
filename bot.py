@@ -196,15 +196,14 @@ async def on_message(msg):
                             await msg.channel.send(f"⚡ **RANK UP:** {member.mention} has leveled up to **{rank_name}**! 🟢")
                     break
 
-        forum_channel = bot.get_channel(FORUM_CH_ID)
+forum_channel = bot.get_channel(FORUM_CH_ID)
         if forum_channel and isinstance(forum_channel, discord.ForumChannel):
+            applied_tags = [t for t in forum_channel.available_tags if t.name == target_tag_name]
+            thread_title = f"[{current_date_prefix}] {tag_label}"
+            await forum_channel.create_thread(name=thread_title, embed=user_embed, applied_tags=applied_tags)
+            try: await msg.delete()
+            except: pass
 
-                        applied_tags = [t for t in forum_channel.available_tags if t.name == target_tag_name]
-                        thread_title = f"[{current_date_prefix}] {tag_label}"
-                        await forum_channel.create_thread(name=thread_title, embed=user_embed, applied_tags=applied_tags)
-                        try: await msg.delete()
-                        except: pass
-            
-                await bot.process_commands(msg)
-            
-            bot.run('MTU0Njg2Mjc1MTA5ODQ3ODY1Mg.GKxOw6.QuDKh_y1nVPobt3GXYix9r81pofCvTOnf75CgY')
+    await bot.process_commands(msg)
+
+bot.run('MTU0Njg2Mjc1MTA5ODQ3ODY1Mg.GKxOw6.QuDKh_y1nVPobt3GXYix9r81pofCvTOnf75CgY')
