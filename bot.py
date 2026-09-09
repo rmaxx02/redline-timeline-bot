@@ -1,14 +1,16 @@
+
 import discord
 from discord.ext import commands, tasks
 import asyncio
 from datetime import datetime
+import re
 
 # 📡 PRODUCTION CHANNEL ID MATRIX - HARDWIRED ROUTING
-LOG_ID = 1546911999051694123 # #🛠️┃bot-terminal Logs ID
-WELCOME_CH_ID = 1546898931458379907 # #📜┃rules Channel ID
+LOG_ID = 1546911999051694123          # #🛠️┃bot-terminal Logs ID
+WELCOME_CH_ID = 1546898931458379907   # #📜┃rules Channel ID
 
 # 🔒 HARDWIRED UNIFIED FORUM TIMELINE ENDPOINT
-FORUM_CH_ID = 1547336797724479519 # Your #📋┃timeline-archive ID
+FORUM_CH_ID = 1547336797724479519     # Your #📋┃timeline-archive ID
 
 intents = discord.Intents.default()
 intents.message_content = True  
@@ -20,9 +22,15 @@ GANG_WAR_WORDS = ["vagos", "ballas", "clapped", "turf", "shootout", "block", "ch
 HEIST_WORDS = ["thermite", "vault", "fleeca", "paleto", "getaway", "hack", "drill", "robbing", "heist", "casino", "yacht"]
 COURT_WORDS = ["objection", "judge", "lawyer", "warrant", "subpoena", "guilty", "court", "appeal", "trial", "case", "arrested"]
 
-# 📊 TRACKING DATA ARCHIVE & SECURITY CACHE
+# 📊 TRACKING DATA ARCHIVE, SECURITY CACHE, & DUPLICATE MEMORY
 USER_DATABASE = {}
 SPAM_COOLDOWN = {}
+PROCESSED_VIDEO_IDS = set()  # 🚫 Permanent link memory duplicate filter tracker Cache
+
+def extract_youtube_id(url):
+    pattern = r'(?:youtube\.com\/(?:[^\/\n\s]+\/\S+\/|(?:v|e(?:mbed)?)\/|\S*?[?&]v=)|youtu\.be\/)([a-zA-Z0-9_-]{11})'
+    match = re.search(pattern, url)
+    return match.group(1) if match else None
 
 @bot.event
 async def on_ready():
@@ -96,6 +104,17 @@ async def on_message(msg):
     content_lower = msg.content.lower()
     
     if "youtube.com" in msg.content or "youtu.be" in msg.content:
+        video_id = extract_youtube_id(msg.content)
+        
+        # 🚫 DUPLICATE VIDEO DETECTION GATEWAY
+        if video_id:
+            if video_id in PROCESSED_VIDEO_IDS:
+                await msg.channel.send(f"❌ {msg.author.mention}, that video has already been logged in the timeline archive grid layout! Duplicate blocked.", delete_after=5)
+                try: await msg.delete()
+                except: pass
+                return
+            PROCESSED_VIDEO_IDS.add(video_id)
+
         uid = msg.author.id
         current_time = msg.created_at.timestamp()
         if current_time - SPAM_COOLDOWN.get(uid, 0) < 5:
