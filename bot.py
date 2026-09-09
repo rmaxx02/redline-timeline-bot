@@ -1,11 +1,17 @@
 import discord
 from discord.ext import commands, tasks
 import asyncio
+from datetime import datetime
 
-# 📡 HARDWIRED SYSTEM CONFIGURATIONS
-FORUM_ID = 1547061966520979457 # #🗂️┃lore-timeline Text Channel ID
+# 📡 PRODUCTION CHANNEL ID MATRIX - HARDWIRED ROUTING
 LOG_ID = 1546911999051694123 # #🛠️┃bot-terminal Logs ID
-WELCOME_CH_ID = 1546898931458379907 # 🔒 YOUR HARDWIRED WELCOME/RULES CHANNEL ID
+WELCOME_CH_ID = 1546898931458379907 # #📜┃rules Channel ID
+
+# 🔒 HARDWIRED TOPIC CHANNEL ENDPOINTS
+GANG_WAR_CH_ID = 1547328181105860739 # Target ID for #🔴┃gang-war-log
+HEIST_CH_ID = 1547328294838472884 # Target ID for #💰┃heist-log
+COURT_CH_ID = 1547328384592519208 # Target ID for #⚖️┃court-log
+GENERAL_CH_ID = 1547329890292867204 # Target ID for #📦┃general-log
 
 intents = discord.Intents.default()
 intents.message_content = True  
@@ -19,23 +25,21 @@ COURT_WORDS = ["objection", "judge", "lawyer", "warrant", "subpoena", "guilty", 
 
 # 📊 TRACKING DATA ARCHIVE & SECURITY CACHE
 USER_DATABASE = {}
-SPAM_COOLDOWN = {} # Anti-Spam time stamp log
+SPAM_COOLDOWN = {}
 
 @bot.event
 async def on_ready():
     print("==================================================")
     print(f"🟢 LOGGED IN SUCCESS: {bot.user.name}")
-    print("Redline Advanced Multi-Track Engine Active...")
+    print("Redline Automated Multi-Channel Router Active...")
     print("==================================================")
     
     log_ch = bot.get_channel(LOG_ID)
     if log_ch:
-        await log_ch.send("📟 **SYSTEM ONLINE:** Production Auto-Tagging Matrix running successfully.")
-    
-    # Start the automated status loop activity shifter
+        await log_ch.send("📟 **SYSTEM ONLINE:** Multi-Channel Log Tagging Router running successfully.")
     status_rotator.start()
 
-# 🔄 UPGRADE 1: AUTOMATED LIVE STATUS ROTATOR LOOP
+# 🔄 AUTOMATED LIVE STATUS ROTATOR LOOP
 bot.status_index = 0
 @tasks.loop(seconds=15)
 async def status_rotator():
@@ -47,15 +51,14 @@ async def status_rotator():
     ]
     await bot.change_presence(activity=statuses[bot.status_index % len(statuses)])
     bot.status_index += 1
-# 🚀 UPGRADE 2: THE INSTANT JOIN WELCOME TEXT & ROLE ASSIGNER
+
+# 🚀 AUTOMATIC MEMBER JOIN GREETING & ROLE ASSIGNER
 @bot.event
 async def on_member_join(member):
-    # Automatically tag them with the base server permission role
     base_role = discord.utils.get(member.guild.roles, name="Member")
     if base_role:
         await member.add_roles(base_role)
         
-    # Fire the gorgeous custom greeting card into your rules channel
     welcome_ch = bot.get_channel(WELCOME_CH_ID)
     if welcome_ch:
         embed = discord.Embed(
@@ -66,8 +69,7 @@ async def on_member_join(member):
                 "1. **Keep Timelines Accurate:** Do not post fake timestamps or spoilers.\n"
                 "2. **Respect the Streamers:** Toxicity or hate speech results in an instant ban.\n"
                 "3. **Separate IC from OOC:** Keep real-world drama completely out of this server.\n"
-                "4. **Follow Discord ToS:** No illegal links or malicious behavior.\n"
-                "5. **Keyword Scan Optimization:** Include keywords like 'war', 'heist', or 'court' in <#1547061966520979457>!\n\n"
+                "4. **Follow Discord ToS:** No illegal links or malicious behavior.\n\n"
                 "🏆 **PROGRESSION MILESTONE MARGINS:**\n"
                 "• Opie Track: Grease Monkey ➔ Street Racer ➔ Getaway Driver ➔ Wheelman\n"
                 "• Tray Track: Script Kiddie ➔ Green Hat ➔ Elite Hacker ➔ Master Hacker\n"
@@ -78,15 +80,10 @@ async def on_member_join(member):
             ),
             color=0xff0000
         )
-        embed.add_field(
-            name="📜 Server Information Center", 
-            value=f"You have been granted the **Member** role! Read the guidelines right here in <#{WELCOME_CH_ID}> and drop clip links in <#{FORUM_ID}> to level up!", 
-            inline=False
-        )
-        embed.set_footer(text=f"Redline operative #{len(member.guild.members)}")
+        embed.set_footer(text=f"Redline Operative #{len(member.guild.members)} | Grid Sync Active")
         await welcome_ch.send(embed=embed)
 
-# 📊 UPGRADE 3: LEADERBOARD STATS COMMAND
+# 📊 LEADERBOARD STATS COMMAND
 @bot.command()
 async def stats(ctx):
     uid = ctx.author.id
@@ -103,134 +100,93 @@ async def stats(ctx):
     embed.set_footer(text="Keep submitting clips to level up your character ranks!")
     await ctx.send(embed=embed)
 
-@bot.command()
-async def trigger_test(ctx, category_choice: str = "war"):
-    if ctx.channel.id != LOG_ID:
-        await ctx.send("❌ Error: Command must be executed inside your private terminal.")
-        return
-
-    choice_lower = category_choice.lower()
-    if choice_lower in ["join", "welcome", "greet"]:
-        await ctx.send("⚡ *Simulating join sequence event handler...*")
-        await on_member_join(ctx.author)
-        await ctx.send("✅ Success! Custom greeting rules panel streamed directly into your rules channel.")
-        return
-    elif "war" in choice_lower or "gang" in choice_lower:
-        tag, box_color = "🔴 GANG WAR LOG", 0xff0000
-    elif "court" in choice_lower or "case" in choice_lower:
-        tag, box_color = "⚖️ COURT CASE RECORD", 0x00f0ff
-    else:
-        tag, box_color = "💰 ACTIVE HEIST TIMELINE", 0x39ff14
-    await ctx.send(f"⚡ *Ingesting simulated YouTube notification payload... Routing to {tag}...*")
-    
-    embed = discord.Embed(
-        title=f"{tag}: The Great Los Santos Operation",
-        description="Chronological stream data compiled and matched via AI keyword scanning.",
-        color=box_color
-    )
-    embed.add_field(name="🔴 Opie's POV (Driver)", value="[Watch Perspective ➔](https://youtube.com)\n*Status: Synced*", inline=False)
-    embed.add_field(name="🔵 Tray Sander's POV (Hacker)", value="[Watch Perspective ➔](https://youtube.com)\n*Status: Synced*", inline=False)
-    embed.add_field(name="🟢 Frenchie's POV (Lookout)", value="[Watch Perspective ➔](https://youtube.com)\n*Status: Synced*", inline=False)
-    embed.set_footer(text=f"AI Data Hub Routing: {category_choice.upper()} | Block Verification: #101")
-    
-    target_channel = bot.get_channel(FORUM_ID)
-    if target_channel:
-        await target_channel.send(embed=embed)
-        await ctx.send("✅ Success! Multi-POV tagged array streamed straight to your timeline wall.")
-
-# 🏆 PROGRESSION EVALUATORS BY TRACK
-def evaluate_opie_rank(count):
-    if count >= 90: return "Wheelman"
-    elif count >= 60: return "Getaway Driver"
-    elif count >= 40: return "Street Racer"
-    elif count >= 10: return "Grease Monkey"
-    return None
-
-def evaluate_tray_rank(count):
-    if count >= 90: return "Master Hacker"
-    elif count >= 60: return "Elite Hacker"
-    elif count >= 40: return "Green Hat"
-    elif count >= 10: return "Script Kiddie"
-    return None
-
-def evaluate_frenchie_rank(count):
-    if count >= 90: return "Ghost Operator"
-    elif count >= 60: return "Infiltrator"
-    elif count >= 40: return "Scout"
-    elif count >= 10: return "Lookout"
-    return None
-
+# 🛠️ SYSTEM ROUTING EVENT FILTER WITH TIMESTAMPS & STREAMER TAGS
 @bot.event
 async def on_message(msg):
     if msg.author.bot:
         return
 
-    if msg.channel.id == FORUM_ID:
-        content_lower = msg.content.lower()
-        detected_tag, embed_color = "📦 GENERAL LOG", 0x808080
+    content_lower = msg.content.lower()
+    
+    if "youtube.com" in msg.content or "youtu.be" in msg.content:
+        uid = msg.author.id
         
+        # Anti-Spam Gate
+        current_time = msg.created_at.timestamp()
+        last_post = SPAM_COOLDOWN.get(uid, 0)
+        if current_time - last_post < 5:
+            await msg.channel.send(f"⚠️ {msg.author.mention}, please slow down!", delete_after=3)
+            try:
+                await msg.delete()
+            except:
+                pass
+            return
+        SPAM_COOLDOWN[uid] = current_time
+
+        # Match tags and choose target endpoint
         if any(word in content_lower for word in GANG_WAR_WORDS):
+            target_channel_id = GANG_WAR_CH_ID
             detected_tag, embed_color = "🔴 GANG WAR LOG", 0xff0000
         elif any(word in content_lower for word in HEIST_WORDS):
+            target_channel_id = HEIST_CH_ID
             detected_tag, embed_color = "💰 ACTIVE HEIST TIMELINE", 0x39ff14
         elif any(word in content_lower for word in COURT_WORDS):
+            target_channel_id = COURT_CH_ID
             detected_tag, embed_color = "⚖️ COURT CASE RECORD", 0x00f0ff
+        else:
+            target_channel_id = GENERAL_CH_ID
+            detected_tag, embed_color = "📦 GENERAL LOG", 0x808080
 
-        if "youtube.com" in msg.content or "youtu.be" in msg.content:
-            uid = msg.author.id
-            
-            # 🛡️ UPGRADE 4: ANTI-SPAM COOLDOWN RATE WARDEN
-            current_time = msg.created_at.timestamp()
-            last_post = SPAM_COOLDOWN.get(uid, 0)
-            if current_time - last_post < 5: # 5-second spam throttle gate
-                await msg.channel.send(f"⚠️ {msg.author.mention}, please slow down! Tracking matrix entries require a 5s cool period.", delete_after=3)
+        # Calculate Scores
+        if uid not in USER_DATABASE:
+            USER_DATABASE[uid] = {"Opie": 0, "Tray": 0, "Frenchie": 0}
+        
+        member = msg.author
+        roles_found = [r.name for r in member.roles]
+        tracked_streamer = None
+        
+        # 🔗 HARDWIRED PROFILE LINKS & TAG MATRIX
+        streamer_tag = "Unknown Operative"
+        if "Opie fan" in roles_found:
+            USER_DATABASE[uid]["Opie"] += 1
+            tracked_streamer = ("Opie's Driver Track", USER_DATABASE[uid]["Opie"])
+            streamer_tag = "[🏎️ Opie (Driver Track)](https://youtube.com)"
+        elif "Tray fan" in roles_found:
+            USER_DATABASE[uid]["Tray"] += 1
+            tracked_streamer = ("Tray Sander's Hacker Track", USER_DATABASE[uid]["Tray"])
+            streamer_tag = "[💻 Tray (Hacker Track)](https://youtube.com)"
+        elif "Frenchie fan" in roles_found:
+            USER_DATABASE[uid]["Frenchie"] += 1
+            tracked_streamer = ("Frenchie's Spotter Track", USER_DATABASE[uid]["Frenchie"])
+            streamer_tag = "[🟢 Frenchie (Spotter Track)](https://youtube.com)"
+
+        # 📅 CREATE DISCORD LIVE TIMESTAMP STRINGS
+        epoch_now = int(msg.created_at.timestamp())
+        discord_time_string = f"<t:{epoch_now}:F> (<t:{epoch_now}:R>)"
+
+        # Construct the beautiful verified log panel card
+        user_embed = discord.Embed(
+            title=f"{detected_tag} DETECTED", 
+            color=embed_color
+        )
+        user_embed.add_field(name="🎬 Track Perspective", value=streamer_tag, inline=True)
+        user_embed.add_field(name="🕒 Log Timestamp", value=discord_time_string, inline=True)
+        user_embed.add_field(name="📥 Submission Link", value=msg.content, inline=False)
+        user_embed.add_field(name="👤 Filed By", value=msg.author.mention, inline=True)
+
+        if tracked_streamer:
+            track_title, track_count = tracked_streamer
+            user_embed.add_field(name="📊 Score Progression", value=f"{track_title}: **{track_count} clips**", inline=True)
+
+        # 🚀 Send the structured card block straight to the specific topic room!
+        destination_channel = bot.get_channel(target_channel_id)
+        if destination_channel:
+            await destination_channel.send(embed=user_embed)
+            try:
                 await msg.delete()
-                return
-            SPAM_COOLDOWN[uid] = current_time
-
-            if uid not in USER_DATABASE:
-                USER_DATABASE[uid] = {"Opie": 0, "Tray": 0, "Frenchie": 0}
-            
-            member = msg.author
-            roles_found = [r.name for r in member.roles]
-            
-            tracked_streamer = None
-            r_name = None
-            
-            if "Opie fan" in roles_found:
-                USER_DATABASE[uid]["Opie"] += 1
-                s_count = USER_DATABASE[uid]["Opie"]
-                tracked_streamer = ("Opie's Driver Track", s_count)
-                r_name = evaluate_opie_rank(s_count)
-            elif "Tray fan" in roles_found:
-                USER_DATABASE[uid]["Tray"] += 1
-                s_count = USER_DATABASE[uid]["Tray"]
-                tracked_streamer = ("Tray Sander's Hacker Track", s_count)
-                r_name = evaluate_tray_rank(s_count)
-            elif "Frenchie fan" in roles_found:
-                USER_DATABASE[uid]["Frenchie"] += 1
-                s_count = USER_DATABASE[uid]["Frenchie"]
-                tracked_streamer = ("Frenchie's Spotter Track", s_count)
-                r_name = evaluate_frenchie_rank(s_count)
-
-            user_embed = discord.Embed(
-                title=f"{detected_tag} DETECTED", 
-                description=f"Clip registered! Submission filed inside core matrix logs.", 
-                color=embed_color
-            )
-            
-            if tracked_streamer:
-                track_title, track_count = tracked_streamer
-                user_embed.add_field(name=f"📈 {track_title}", value=f"Total path submissions: **{track_count}**")
-                
-                if r_name and r_name not in roles_found:
-                    role = discord.utils.get(member.guild.roles, name=r_name)
-                    if role:
-                        await member.add_roles(role)
-                        await msg.channel.send(f"⚡ **TRACK OVERRIDE RANK UP:** {member.mention} has leveled up to **{r_name}** ({track_count} clips sent)! 🟢")
-
-            await msg.channel.send(embed=user_embed)
+            except:
+                pass
 
     await bot.process_commands(msg)
 
-bot.run('MTU0Njg2Mjc1MTA5ODQ3ODY1Mg.GojeT_.rEQEJS-wvaSq8UHAlW2BixxPKV0sSRqt9V8Edw')
+bot.run('MTU0Njg2Mjc1MTA5ODQ3ODY1Mg.GKxOw6.QuDKh_y1nVPobt3GXYix9r81pofCvTOnf75CgY')
