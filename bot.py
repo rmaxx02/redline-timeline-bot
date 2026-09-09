@@ -33,6 +33,55 @@ async def on_ready():
     log_ch = bot.get_channel(LOG_ID)
     if log_ch:
         await log_ch.send("📟 **SYSTEM ONLINE:** Chronological Forum Timeline Router running successfully.")
+    status_rotator.start()
+
+# 🔄 AUTOMATED LIVE STATUS ROTATOR LOOP
+bot.status_index = 0
+@tasks.loop(seconds=15)
+async def status_rotator():
+    statuses = [
+        discord.Activity(type=discord.ActivityType.watching, name="🏎️ Opie's POV (Driver)"),
+        discord.Activity(type=discord.ActivityType.watching, name="💻 Tray's POV (Hacker)"),
+        discord.Activity(type=discord.ActivityType.watching, name="🟢 Frenchie's POV (Spotter)"),
+        discord.Activity(type=discord.ActivityType.listening, name="!stats commands")
+    ]
+    await bot.change_presence(activity=statuses[bot.status_index % len(statuses)])
+    bot.status_index += 1
+
+# 🚀 AUTOMATIC MEMBER JOIN GREETING & ROLE ASSIGNER
+@bot.event
+async def on_member_join(member):
+    base_role = discord.utils.get(member.guild.roles, name="Member")
+    if base_role: await member.add_roles(base_role)
+    welcome_ch = bot.get_channel(WELCOME_CH_ID)
+    if welcome_ch:
+        embed = discord.Embed(
+            title="🏁 WELCOME TO THE REDLINE MATRIX TRACKER 🏁",
+            description=(
+                "Welcome to the ultimate multi-POV roleplay tracking network!\n\n"
+                "📌 **SERVER REQUISITE GUIDELINES:**\n"
+                "1. **Keep Timelines Accurate:** Do not post fake timestamps or spoilers.\n"
+                "2. **Respect the Streamers:** Toxicity or hate speech results in an instant ban.\n"
+                "3. **Separate IC from OOC:** Keep real-world drama completely out of this server.\n"
+                "4. **Follow Discord ToS:** No illegal links or malicious behavior.\n\n"
+                "🏆 **PROGRESSION MILESTONE MARGINS:**\n"
+                "• Opie Track: Grease Monkey ➔ Street Racer ➔ Getaway Driver ➔ Wheelman\n"
+                "• Tray Track: Script Kiddie ➔ Green Hat ➔ Elite Hacker ➔ Master Hacker\n"
+                "• Frenchie Track: Lookout ➔ Scout ➔ Infiltrator ➔ Ghost Operator\n\n"
+                "📊 **UTILITY COMMAND PANEL:**\n"
+                "• Type `!stats` anywhere to view your personal scoreboard!\n\n"
+                "👉 Tap the **🔮│get-roles** channel next to pick your streamer team!"
+            ),
+            color=0xff0000
+        )
+        embed.set_footer(text=f"Redline Operative #{len(member.guild.members)} | Grid Sync Active")
+        await welcome_ch.send(embed=embed)
+
+# 📊 LEADERBOARD STATS COMMAND
+@bot.command()
+async def stats(ctx):
+    uid = ctx.author.id
+    user_data = USER_DATABASE.get(uid, {"Opie": 0, "Tray": 0, "Frenchie": 0})
     embed = discord.Embed(title=f"📊 {ctx.author.name}'s Track Progression Stats", description="Your verified milestone submissions.", color=0xe67e22)
     embed.add_field(name="🏎️ Opie (Driver Track)", value=f"Submissions: **{user_data['Opie']}**", inline=True)
     embed.add_field(name="💻 Tray (Hacker Track)", value=f"Submissions: **{user_data['Tray']}**", inline=True)
