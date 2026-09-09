@@ -182,23 +182,23 @@ async def on_message(msg):
             track_title, track_count = tracked_streamer
             user_embed.add_field(name="📊 Score Progression", value=f"{track_title}: **{track_count} clips**", inline=True)
             
-            rank_map =  # 🆕 COMPRESSED RANK MAPPING DICTIONARY
-                        rank_map = {
-                            "Opie": [(90, "Wheelman"), (60, "Getaway Driver"), (40, "Street Racer"), (10, "Grease Monkey")],
-                            "Tray": [(90, "Master Hacker"), (60, "Elite Hacker"), (40, "Green Hat"), (10, "Script Kiddie")],
-                            "Frenchie": [(90, "Ghost Operator"), (60, "Infiltrator"), (40, "Scout"), (10, "Lookout")]
-                        }
-                        for milestone, rank_name in rank_map[track_key]:
-                            if track_count >= milestone:
-                                if rank_name not in roles_found:
-                                    role = discord.utils.get(member.guild.roles, name=rank_name)
-                                    if role:
-                                        await member.add_roles(role)
-                                        await msg.channel.send(f"⚡ **RANK UP:** {member.mention} has leveled up to **{rank_name}**! 🟢")
-                                break
-            
-                    forum_channel = bot.get_channel(FORUM_CH_ID)
-                    if forum_channel and isinstance(forum_channel, discord.ForumChannel):
+            rank_map = {
+                "Opie": [(90, "Wheelman"), (60, "Getaway Driver"), (40, "Street Racer"), (10, "Grease Monkey")],
+                "Tray": [(90, "Master Hacker"), (60, "Elite Hacker"), (40, "Green Hat"), (10, "Script Kiddie")],
+                "Frenchie": [(90, "Ghost Operator"), (60, "Infiltrator"), (40, "Scout"), (10, "Lookout")]
+            }
+            for milestone, rank_name in rank_map[track_key]:
+                if track_count >= milestone:
+                    if rank_name not in roles_found:
+                        role = discord.utils.get(member.guild.roles, name=rank_name)
+                        if role:
+                            await member.add_roles(role)
+                            await msg.channel.send(f"⚡ **RANK UP:** {member.mention} has leveled up to **{rank_name}**! 🟢")
+                    break
+
+        forum_channel = bot.get_channel(FORUM_CH_ID)
+        if forum_channel and isinstance(forum_channel, discord.ForumChannel):
+
                         applied_tags = [t for t in forum_channel.available_tags if t.name == target_tag_name]
                         thread_title = f"[{current_date_prefix}] {tag_label}"
                         await forum_channel.create_thread(name=thread_title, embed=user_embed, applied_tags=applied_tags)
