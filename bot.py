@@ -109,6 +109,7 @@ async def trigger_test(ctx, category_choice: str = "war"):
         await ctx.send("❌ Error: Command must be executed inside your private terminal.")
         return
 
+    choice_lower = category_choice.lower()
     if choice_lower in ["join", "welcome", "greet"]:
         await ctx.send("⚡ *Simulating join sequence event handler...*")
         await on_member_join(ctx.author)
@@ -120,8 +121,6 @@ async def trigger_test(ctx, category_choice: str = "war"):
         tag, box_color = "⚖️ COURT CASE RECORD", 0x00f0ff
     else:
         tag, box_color = "💰 ACTIVE HEIST TIMELINE", 0x39ff14
-        tag, box_color = "💰 ACTIVE HEIST TIMELINE", 0x39ff14
-
     await ctx.send(f"⚡ *Ingesting simulated YouTube notification payload... Routing to {tag}...*")
     
     embed = discord.Embed(
