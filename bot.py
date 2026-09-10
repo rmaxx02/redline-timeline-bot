@@ -167,12 +167,14 @@ async def on_message(msg):
         target_year_tag_name = msg.created_at.strftime("%Y Archive")
         
         try:
-            html_req = urllib.request.Request(video_url, headers={'User-Agent': 'Mozilla/5.0'})
-            with urllib.request.urlopen(html_req, timeout=3) as html_res:
+            html_req = urllib.request.Request(video_url, headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'})
+            with urllib.request.urlopen(html_req, timeout=5) as html_res:
                 html_text = html_res.read().decode('utf-8', errors='ignore')
-                date_match = re.search(r'"uploadDate"\\s*:\\s*"([^"]+)"', html_text)
+                
+                date_match = re.search(r'<meta[^>]*itemprop=["\']uploadDate["\'][^>]*content=["\']([^"\']+)["\']', html_text)
                 if not date_match:
-                    date_match = re.search(r'"uploadDate"\s*:\s*"([^"]+)"', html_text)
+                    date_match = re.search(r'["\']uploadDate["\']\s*:\s*["\']([^"\']+)["\']', html_text)
+                    
                 if date_match:
                     raw_date_str = date_match.group(1).split("T")[0]
                     youtube_upload_date_string = raw_date_str
