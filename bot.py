@@ -25,10 +25,10 @@ SPAM_COOLDOWN = {}
 PROCESSED_VIDEOS_CACHE = set()
 @bot.event
 async def on_ready():
-print("==================================================")
-print(f"🟢 LOGGED IN SUCCESS: {bot.user.name}")
-print("Redline Duplicate-Proof Forum Router Active...")
-print("==================================================")
+    print("==================================================")
+    print(f"🟢 LOGGED IN SUCCESS: {bot.user.name}")
+    print("Redline Duplicate-Proof Forum Router Active...")
+    print("==================================================")
 log_ch = bot.get_channel(LOG_ID)
 if log_ch:
 await log_ch.send("📟 SYSTEM ONLINE: Upgraded Chronological Forum Router running successfully.")
