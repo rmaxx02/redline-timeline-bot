@@ -31,7 +31,7 @@ async def on_ready():
     print("==================================================")
 log_ch = bot.get_channel(LOG_ID)
 if log_ch:
-await log_ch.send("📟 SYSTEM ONLINE: Upgraded Chronological Forum Router running successfully.")
+    await log_ch.send("📟 SYSTEM ONLINE: Upgraded Chronological Forum Router running successfully.")
 status_rotator.start()
 bot.status_index = 0
 @tasks.loop(seconds=15)
