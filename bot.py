@@ -182,7 +182,7 @@ async def on_message(msg):
                     thread_date_prefix = dt_obj.strftime("%b %Y")
                     
                     if dt_obj.year == datetime.now().year:
-                        target_year_tag_name = f"{dt_obj.year} Current"
+                        target_year_tag_name = f"{dt_obj.year} Archive"
                     else:
                         target_year_tag_name = f"{dt_obj.year} Archive"
         except Exception as e:
