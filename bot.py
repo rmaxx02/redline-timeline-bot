@@ -181,7 +181,7 @@ async def on_message(msg):
         forum_channel = bot.get_channel(FORUM_CH_ID)
         if forum_channel and isinstance(forum_channel, discord.ForumChannel):
             applied_tags = [t for t in forum_channel.available_tags if t.name == target_tag_name]
-            thread_title = f"[{current_date_prefix}] {tag_label}"
+            user_msg_clean = re.sub(r"https?://s+","", msg.content).strip(); thread_title = f"[{current_date_prefix}] {user_msg_clean[:50]}" if user_msg_clean else f"[{current_date_prefix}] {tag_label}"
             await forum_channel.create_thread(name=thread_title, embed=user_embed, applied_tags=applied_tags)
             try: await msg.delete()
             except: pass
