@@ -6,28 +6,34 @@ import re
 import urllib.request
 import json
 
-LOG_ID = 1546911999051694123          
-WELCOME_CH_ID = 1546898931458379907   
-FORUM_CH_ID = 1547336797724479519     
+# 📡 PRODUCTION CHANNEL ID MATRIX - HARDWIRED ROUTING
+LOG_ID = 1546911999051694123          # #🛠️┃bot-terminal Logs ID
+WELCOME_CH_ID = 1546898931458379907   # #📜┃rules Channel ID
+
+# 🔒 HARDWIRED UNIFIED FORUM TIMELINE ENDPOINT
+FORUM_CH_ID = 1547336797724479519     # Your #📋┃timeline-archive ID
 
 intents = discord.Intents.default()
 intents.message_content = True  
 intents.members = True 
 bot = commands.Bot(command_prefix="!", intents=intents)
 
+# 🧠 THE KEYWORD BRAIN TABLES
 GANG_WAR_WORDS = ["vagos", "ballas", "clapped", "turf", "shootout", "block", "chonny", "marabunta", "war", "cg", "gg", "pdw"]
 HEIST_WORDS = ["thermite", "vault", "fleeca", "paleto", "getaway", "hack", "drill", "robbing", "heist", "casino", "yacht"]
 COURT_WORDS = ["objection", "judge", "lawyer", "warrant", "subpoena", "guilty", "court", "appeal", "trial", "case", "arrested"]
 
+# 👥 AI PLAYER IDENTITIES DATABASE FOR AUTOMATIC DISCORD MEMBER TAGGING
 PLAYERS_DATABASE = {
-    "opie": "<@1547328181105860739>",      
-    "tray": "<@1547328294838472884>",      
-    "frenchie": "<@1547328384592519208>"   
+    "opie": "<@1547328181105860739>",      # Active tag link for Opie
+    "tray": "<@1547328294838472884>",      # Active tag link for Tray Sanders
+    "frenchie": "<@1547328384592519208>"   # Active tag link for Frenchie
 }
 
+# 📊 TRACKING DATA ARCHIVE, ANTI-DUPLICATE MEMORY & COOLDOWNS
 USER_DATABASE = {}
 SPAM_COOLDOWN = {}
-PROCESSED_VIDEOS_CACHE = set()  
+PROCESSED_VIDEOS_CACHE = set()  # Brain memory cache that permanently blocks duplicate video links
 
 @bot.event
 async def on_ready():
@@ -40,6 +46,7 @@ async def on_ready():
         await log_ch.send("📟 **SYSTEM ONLINE:** Upgraded Chronological Forum Router running successfully.")
     status_rotator.start()
 
+# 🔄 AUTOMATED LIVE STATUS ROTATOR LOOP
 bot.status_index = 0
 @tasks.loop(seconds=15)
 async def status_rotator():
@@ -52,6 +59,7 @@ async def status_rotator():
     await bot.change_presence(activity=statuses[bot.status_index % len(statuses)])
     bot.status_index += 1
 
+# 🚀 AUTOMATIC MEMBER JOIN GREETING & ROLE ASSIGNER
 @bot.event
 async def on_member_join(member):
     base_role = discord.utils.get(member.guild.roles, name="Member")
@@ -80,6 +88,7 @@ async def on_member_join(member):
         embed.set_footer(text=f"Redline Operative #{len(member.guild.members)} | Grid Sync Active")
         await welcome_ch.send(embed=embed)
 
+# 📊 UPGRADED LEADERBOARD STATS COMMAND
 @bot.command()
 async def stats(ctx, *, option: str = None):
     if option and option.lower() == "leaderboard":
@@ -94,7 +103,7 @@ async def stats(ctx, *, option: str = None):
             user_name = user_obj.name if user_obj else f"User {uid}"
             leaderboard_data.append((user_name, total_clips, data.get("Opie", 0), data.get("Tray", 0), data.get("Frenchie", 0)))
             
-        leaderboard_data.sort(key=lambda x: x[1], reverse=True)
+        leaderboard_data.sort(key=lambda x: x, reverse=True)
         
         embed = discord.Embed(title="🏆 REDLINE OVERALL CLIPS LEADERBOARD 🏆", description="The server's top verified chronological timeline contributors.", color=0xd4af37)
         for i, (name, total, opie_pts, tray_pts, frenchie_pts) in enumerate(leaderboard_data[:5], 1):
@@ -116,6 +125,7 @@ async def stats(ctx, *, option: str = None):
     embed.set_footer(text="Type '!stats leaderboard' to see the server's top 5 contributors!")
     await ctx.send(embed=embed)
 
+# 📋 CHRONOLOGICAL FORUM ROUTING FILTER WITH SPAM & DUPLICATE BLOCKING
 @bot.event
 async def on_message(msg):
     if msg.author.bot: return
@@ -135,6 +145,7 @@ async def on_message(msg):
             return
         SPAM_COOLDOWN[uid] = current_time
 
+        # 🧠 ANTI-DUPLICATE BLOCK
         if video_id in PROCESSED_VIDEOS_CACHE:
             try: await msg.delete()
             except: pass
@@ -146,6 +157,7 @@ async def on_message(msg):
             return
         PROCESSED_VIDEOS_CACHE.add(video_id)
 
+        # 📡 BROWSER-SPOOF DATA ENGINE LOOKUP - FETCH REAL YOUTUBE TITLE & PICTURE THUMBNAIL
         actual_video_title = "Unknown Clip Entry Description"
         video_thumbnail_url = None
         try:
@@ -162,32 +174,26 @@ async def on_message(msg):
         except Exception as e:
             print(f"Title fetch failed: {e}")
 
+        # 📅 BACKEND YOUTUBE METADATA SOURCE WORKFLOW: Scrapes page elements to pull the real YouTube Upload Date
         youtube_upload_date_string = msg.created_at.strftime("%Y-%m-%d") 
         thread_date_prefix = msg.created_at.strftime("%b %Y") 
-        target_year_tag_name = msg.created_at.strftime("%Y Archive")
+        target_year_tag_name = f"{msg.created_at.year} Archive"
         
         try:
-            html_req = urllib.request.Request(video_url, headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'})
-            with urllib.request.urlopen(html_req, timeout=5) as html_res:
+            html_req = urllib.request.Request(video_url, headers={'User-Agent': 'Mozilla/5.0'})
+            with urllib.request.urlopen(html_req, timeout=3) as html_res:
                 html_text = html_res.read().decode('utf-8', errors='ignore')
-                
-                date_match = re.search(r'<meta[^>]*itemprop=["\']uploadDate["\'][^>]*content=["\']([^"\']+)["\']', html_text)
-                if not date_match:
-                    date_match = re.search(r'["\']uploadDate["\']\s*:\s*["\']([^"\']+)["\']', html_text)
-                    
+                date_match = re.search(r'"uploadDate"\s*:\s*"([^"]+)"', html_text)
                 if date_match:
-                    raw_date_str = date_match.group(1).split("T")[0]
-                    youtube_upload_date_string = raw_date_str
-                    dt_obj = datetime.strptime(raw_date_str, "%Y-%m-%d")
+                    raw_date_str = date_match.group(1).split("T")
+                    youtube_upload_date_string = raw_date_str[0]  # Fixed extracted calendar template index string line safely!
+                    dt_obj = datetime.strptime(youtube_upload_date_string, "%Y-%m-%d")
                     thread_date_prefix = dt_obj.strftime("%b %Y")
-                    
-                    if dt_obj.year == datetime.now().year:
-                        target_year_tag_name = f"{dt_obj.year} Current"
-                    else:
-                        target_year_tag_name = f"{dt_obj.year} Archive"
+                    target_year_tag_name = f"{dt_obj.year} Archive"
         except Exception as e:
             print(f"Upload date fetch failed: {e}")
 
+        # 🤖 AI NATURAL LANGUAGE NLP ENGINE: Scans full text to auto-tag matching active players based on keywords
         detected_player_tags = []
         for player_key, discord_ping_string in PLAYERS_DATABASE.items():
             if player_key in content_lower or player_key in actual_video_title.lower():
@@ -196,6 +202,7 @@ async def on_message(msg):
         
         tagged_players_output_string = " ".join(detected_player_tags) if detected_player_tags else "*No matching streamer names identified inside description blocks*"
 
+        # KEYWORD DESCRIPTION AUTO-CATEGORIZATION ENGINE
         combined_metadata_text = f"{content_lower} {actual_video_title.lower()}"
         
         if any(word in combined_metadata_text for word in GANG_WAR_WORDS): tag_label, target_tag_name, embed_color = "🔴 GANG WAR LOG", "🔴 Gang War", 0xff0000
@@ -220,7 +227,7 @@ async def on_message(msg):
         elif "Frenchie fan" in roles_found:
             USER_DATABASE[uid]["Frenchie"] += 1
             track_key, tracked_streamer = "Frenchie", ("Frenchie's Recon Track", USER_DATABASE[uid]["Frenchie"])
-            streamer_tag = "[🚓 Frenchie (Recon Track)](https://www.youtube.com/@Frenchie)"
+            streamer_tag = "[物理 Frenchie (Recon Track)](https://www.youtube.com/@Frenchie)"
             target_streamer_tag_name = "🚓 Frenchie"
 
         user_embed = discord.Embed(title=f"{tag_label} DETECTED", color=embed_color)
@@ -253,9 +260,20 @@ async def on_message(msg):
 
         forum_channel = bot.get_channel(FORUM_CH_ID)
         if forum_channel and isinstance(forum_channel, discord.ForumChannel):
+            # Smart text scanners to automatically detect and auto-press matching streamer button tags based on keywords found
+            detected_streamer_tag = None
+            if "opie" in combined_metadata_text:
+                detected_streamer_tag = "🏎️ Opie"
+            elif "tray" in combined_metadata_text:
+                detected_streamer_tag = "💻 Tray"
+            elif "frenchie" in combined_metadata_text:
+                detected_streamer_tag = "🚓 Frenchie"
+            else:
+                detected_streamer_tag = target_streamer_tag_name
+
             applied_tags = [
                 t for t in forum_channel.available_tags 
-                if t.name in [target_tag_name, target_streamer_tag_name, target_year_tag_name]
+                if t.name in [target_tag_name, detected_streamer_tag, target_year_tag_name]
             ]
             
             clean_streamer_name = target_streamer_tag_name.replace("🏎️ ", "").replace("💻 ", "").replace("🚓 ", "") if target_streamer_tag_name else "Unknown"
@@ -272,4 +290,4 @@ async def on_message(msg):
 
     await bot.process_commands(msg)
 
-bot.run('MTU0Njg2Mjc1MTA5ODQ3ODY1Mg.GZvCUF.9IOMOInvfxViUfMCEZkTkZ0xkefuuHaTwKUyTc')
+bot.run('MTU4Njg2Mjc1MTA5ODQ3ODY1Mg.GKxOw6.QuDkH_y1nVPobt3GXYix9r81pofCvTOnf75CgY')
