@@ -183,7 +183,7 @@ async def on_message(msg):
             # 📅 Whitelisted oEmbed parsing engine ensures data downloads are completely immune to firewall blocks
             params = urllib.parse.urlencode({'format': 'json', 'url': video_url})
             req = urllib.request.Request(
-                f"https://youtube.com?{params}", 
+                f"https://youtube.com/oembed?{params}", 
                 headers={'User-Agent': 'Mozilla/5.0'}
             )
             with urllib.request.urlopen(req, timeout=3) as res:
