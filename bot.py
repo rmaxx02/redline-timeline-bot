@@ -227,7 +227,7 @@ async def on_message(msg):
         elif "Frenchie fan" in roles_found:
             USER_DATABASE[uid]["Frenchie"] += 1
             track_key, tracked_streamer = "Frenchie", ("Frenchie's Recon Track", USER_DATABASE[uid]["Frenchie"])
-            streamer_tag = "[物理 Frenchie (Recon Track)](https://www.youtube.com/@Frenchie)"
+            streamer_tag = "[🚓 Frenchie (Recon Track)](https://www.youtube.com/@Frenchie)"
             target_streamer_tag_name = "🚓 Frenchie"
 
         user_embed = discord.Embed(title=f"{tag_label} DETECTED", color=embed_color)
