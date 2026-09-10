@@ -180,31 +180,21 @@ async def on_message(msg):
         target_year_tag_name = f"{msg.created_at.year} Archive"
         
         try:
-            # 📅 Whitelisted oEmbed parsing engine ensures data downloads are completely immune to firewall blocks
-            params = urllib.parse.urlencode({'format': 'json', 'url': video_url})
-            req = urllib.request.Request(
-                f"https://youtube.com/oembed?{params}", 
-                headers={'User-Agent': 'Mozilla/5.0'}
-            )
-            with urllib.request.urlopen(req, timeout=3) as res:
-                oembed_data = json.loads(res.read().decode())
-                # Pulls the true original YouTube publish timestamp matrix
-                html_req = urllib.request.Request(video_url, headers={'User-Agent': 'Mozilla/5.0'})
-                with urllib.request.urlopen(html_req, timeout=3) as html_res:
-                    html_text = html_res.read().decode('utf-8', errors='ignore')
-                    date_match = re.search(r'"uploadDate"\s*:\s*"([^"]+)"', html_text)
-                    if not date_match:
-                        date_match = re.search(r'itemprop="datePublished"\s+content="([^"]+)"', html_text)
-                    
-                    if date_match:
-                        youtube_upload_date_string = date_match.group(1).split("T")[0]
-                        dt_obj = datetime.strptime(youtube_upload_date_string, "%Y-%m-%d")
-                        thread_date_prefix = dt_obj.strftime("%b %Y")
-                        target_year_tag_name = f"{dt_obj.year} Archive"
+            html_req = urllib.request.Request(video_url, headers={'User-Agent': 'Mozilla/5.0'})
+            with urllib.request.urlopen(html_req, timeout=5) as html_res:
+                html_text = html_res.read().decode('utf-8', errors='ignore')
+                date_match = re.search(r'"uploadDate"\s*:\s*"([^"]+)"', html_text)
+                if not date_match:
+                    date_match = re.search(r'itemprop="datePublished"\s+content="([^"]+)"', html_text)
+                
+                if date_match:
+                    raw_date_str = date_match.group(1).split("T")
+                    youtube_upload_date_string = raw_date_str[0]
+                    dt_obj = datetime.strptime(youtube_upload_date_string, "%Y-%m-%d")
+                    thread_date_prefix = dt_obj.strftime("%b %Y")
+                    target_year_tag_name = f"{dt_obj.year} Archive"
         except Exception as e:
-            print(f"Metadata engine fallback activated: {e}")
-
-
+            print(f"Historical upload date fetch failed: {e}")
             print(f"Upload date fetch failed: {e}")
 
         # 🤖 AI NATURAL LANGUAGE NLP ENGINE: Scans full text to auto-tag matching active players based on keywords
