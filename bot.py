@@ -1,17 +1,28 @@
+import os
+from dotenv import load_dotenv
 import discord
 from discord.ext import commands, tasks
 import asyncio
-from datetime import datetime
+from datetime import datetime, timezone
+from collections import deque
 import re
 import urllib.request
+import urllib.parse
 import json
+
+load_dotenv()  # reads variables from a .env file in the same folder, if present
 
 # 📡 PRODUCTION CHANNEL ID MATRIX - HARDWIRED ROUTING
 LOG_ID = 1546911999051694123          # #🛠️┃bot-terminal Logs ID
 WELCOME_CH_ID = 1546898931458379907   # #📜┃rules Channel ID
+ANNOUNCE_CH_ID = 1546911999051694123  # ⬅️ REPLACE with the channel ID for "went live / new upload" announcements
 
 # 🔒 HARDWIRED UNIFIED FORUM TIMELINE ENDPOINT
 FORUM_CH_ID = 1547336797724479519     # Your #📋┃timeline-archive ID
+
+# 🔑 SECRETS - loaded from environment, never hardcoded
+DISCORD_TOKEN = os.environ.get("DISCORD_BOT_TOKEN")
+YOUTUBE_API_KEY = os.environ.get("YOUTUBE_API_KEY")
 
 intents = discord.Intents.default()
 intents.message_content = True  
@@ -30,10 +41,121 @@ PLAYERS_DATABASE = {
     "frenchie": "<@1547328384592519208>"   # Active tag link for Frenchie
 }
 
+# 📺 YOUTUBE CHANNEL IDS FOR LIVE/UPLOAD POLLING
+# NOTE: these must be YouTube "Channel ID" values (start with "UC..."), not @handles.
+# Find them via https://www.youtube.com/account_advanced while logged into that channel,
+# or by viewing page source of the channel and searching for "channelId".
+STREAMER_YOUTUBE_CHANNELS = {
+    "Opie": "UC8Uy6FP4vuSA_pTRXvCJmPQ",
+    "Tray": "UCa1R0o4KutQTmi6ObmngGRQ",
+    "Frenchie": "UCcISgmobjhJQzMqXMnnzgeQ",
+}
+
 # 📊 TRACKING DATA ARCHIVE, ANTI-DUPLICATE MEMORY & COOLDOWNS
 USER_DATABASE = {}
 SPAM_COOLDOWN = {}
 PROCESSED_VIDEOS_CACHE = set()  # Brain memory cache that permanently blocks duplicate video links
+
+# 📺 LIVE/UPLOAD POLLING MEMORY (per streamer, so we don't re-announce the same video/stream)
+LAST_ANNOUNCED_VIDEO_ID = {name: None for name in STREAMER_YOUTUBE_CHANNELS}
+LAST_ANNOUNCED_LIVE_ID = {name: None for name in STREAMER_YOUTUBE_CHANNELS}
+
+# 🧵 RECENT ACTIVITY MEMORY - keeps the last 8 known video/live events per streamer, newest first.
+# (Not currently used for anything beyond bookkeeping - reserved for a future feature.)
+RECENT_VIDEOS_LOG = {name: deque(maxlen=8) for name in STREAMER_YOUTUBE_CHANNELS}
+
+
+def record_recent_activity(streamer_name: str, kind: str, title: str, url: str, date_str: str):
+    """Adds an event (upload/live/community-submitted clip) to the in-memory recent activity log."""
+    if streamer_name not in RECENT_VIDEOS_LOG:
+        RECENT_VIDEOS_LOG[streamer_name] = deque(maxlen=8)
+    RECENT_VIDEOS_LOG[streamer_name].appendleft({
+        "kind": kind,       # "upload", "live", or "community_clip"
+        "title": title,
+        "url": url,
+        "date": date_str,
+    })
+
+
+def fetch_youtube_video_metadata(video_id: str):
+    """
+    Calls the official YouTube Data API v3 videos.list endpoint to get reliable
+    metadata for a single video, including its real publish date (snippet.publishedAt)
+    and live broadcast status (liveStreamingDetails / snippet.liveBroadcastContent).
+    Returns a dict or None if the lookup fails.
+    """
+    if not YOUTUBE_API_KEY:
+        print("YOUTUBE_API_KEY not set - cannot fetch reliable publish date.")
+        return None
+    try:
+        params = urllib.parse.urlencode({
+            "part": "snippet,liveStreamingDetails",
+            "id": video_id,
+            "key": YOUTUBE_API_KEY,
+        })
+        url = f"https://www.googleapis.com/youtube/v3/videos?{params}"
+        with urllib.request.urlopen(url, timeout=5) as response:
+            data = json.loads(response.read().decode())
+            items = data.get("items", [])
+            if not items:
+                return None
+            return items[0]
+    except Exception as e:
+        print(f"YouTube Data API video lookup failed: {e}")
+        return None
+
+
+def fetch_latest_channel_activity(channel_id: str):
+    """
+    Calls YouTube Data API v3 search.list for a channel, ordered by date, to find
+    the most recent upload. Also checks specifically for an active live broadcast.
+    Returns (latest_video_item_or_None, live_video_item_or_None).
+    """
+    if not YOUTUBE_API_KEY:
+        return None, None
+
+    latest_video = None
+    live_video = None
+
+    try:
+        # Most recent upload (any type)
+        params = urllib.parse.urlencode({
+            "part": "snippet",
+            "channelId": channel_id,
+            "order": "date",
+            "maxResults": 1,
+            "type": "video",
+            "key": YOUTUBE_API_KEY,
+        })
+        url = f"https://www.googleapis.com/youtube/v3/search?{params}"
+        with urllib.request.urlopen(url, timeout=5) as response:
+            data = json.loads(response.read().decode())
+            items = data.get("items", [])
+            if items:
+                latest_video = items[0]
+    except Exception as e:
+        print(f"YouTube latest-upload lookup failed for {channel_id}: {e}")
+
+    try:
+        # Active live broadcast, if any
+        live_params = urllib.parse.urlencode({
+            "part": "snippet",
+            "channelId": channel_id,
+            "eventType": "live",
+            "type": "video",
+            "key": YOUTUBE_API_KEY,
+        })
+        live_url = f"https://www.googleapis.com/youtube/v3/search?{live_params}"
+        with urllib.request.urlopen(live_url, timeout=5) as live_response:
+            live_data = json.loads(live_response.read().decode())
+            live_items = live_data.get("items", [])
+            if live_items:
+                live_video = live_items[0]
+    except Exception as e:
+        print(f"YouTube live-check lookup failed for {channel_id}: {e}")
+
+    return latest_video, live_video
+
 
 @bot.event
 async def on_ready():
@@ -45,6 +167,7 @@ async def on_ready():
     if log_ch:
         await log_ch.send("📟 **SYSTEM ONLINE:** Upgraded Chronological Forum Router running successfully.")
     status_rotator.start()
+    youtube_activity_poller.start()
 
 # 🔄 AUTOMATED LIVE STATUS ROTATOR LOOP
 bot.status_index = 0
@@ -58,6 +181,83 @@ async def status_rotator():
     ]
     await bot.change_presence(activity=statuses[bot.status_index % len(statuses)])
     bot.status_index += 1
+
+
+# 📺 AUTOMATED YOUTUBE LIVE / NEW-UPLOAD ANNOUNCEMENT LOOP
+@tasks.loop(minutes=5)
+async def youtube_activity_poller():
+    announce_ch = bot.get_channel(ANNOUNCE_CH_ID)
+    log_ch = bot.get_channel(LOG_ID)
+
+    for streamer_name, channel_id in STREAMER_YOUTUBE_CHANNELS.items():
+        if "UCXXXX" in channel_id or "UCYYYY" in channel_id or "UCZZZZ" in channel_id:
+            # Placeholder channel ID not yet configured - skip silently.
+            continue
+
+        latest_video, live_video = fetch_latest_channel_activity(channel_id)
+
+        # --- Live broadcast check ---
+        if live_video:
+            live_video_id = live_video["id"]["videoId"]
+            if LAST_ANNOUNCED_LIVE_ID.get(streamer_name) != live_video_id:
+                LAST_ANNOUNCED_LIVE_ID[streamer_name] = live_video_id
+                title = live_video["snippet"]["title"]
+                thumbnail = live_video["snippet"]["thumbnails"]["high"]["url"]
+                video_url = f"https://www.youtube.com/watch?v={live_video_id}"
+
+                if announce_ch:
+                    embed = discord.Embed(
+                        title=f"🔴 {streamer_name} IS LIVE NOW",
+                        description=title,
+                        url=video_url,
+                        color=0xff0000,
+                    )
+                    embed.set_image(url=thumbnail)
+                    embed.set_footer(text="Redline Live Alert System")
+                    await announce_ch.send(content="@here", embed=embed)
+
+                if log_ch:
+                    await log_ch.send(f"📡 **LIVE DETECTED:** {streamer_name} started streaming. `{video_url}`")
+
+                record_recent_activity(streamer_name, "live", title, video_url,
+                                        datetime.now(timezone.utc).strftime("%Y-%m-%d"))
+
+        # --- New upload check ---
+        if latest_video:
+            video_id = latest_video["id"]["videoId"]
+            if LAST_ANNOUNCED_VIDEO_ID.get(streamer_name) is None:
+                # First run for this streamer: just record the current latest video,
+                # don't announce it (avoids blasting old content on bot startup).
+                LAST_ANNOUNCED_VIDEO_ID[streamer_name] = video_id
+            elif LAST_ANNOUNCED_VIDEO_ID.get(streamer_name) != video_id:
+                LAST_ANNOUNCED_VIDEO_ID[streamer_name] = video_id
+                title = latest_video["snippet"]["title"]
+                thumbnail = latest_video["snippet"]["thumbnails"]["high"]["url"]
+                video_url = f"https://www.youtube.com/watch?v={video_id}"
+                published_at = latest_video["snippet"].get("publishedAt", "Unknown")
+
+                if announce_ch:
+                    embed = discord.Embed(
+                        title=f"📹 {streamer_name} JUST POSTED A NEW VIDEO",
+                        description=title,
+                        url=video_url,
+                        color=0x39ff14,
+                    )
+                    embed.add_field(name="📅 Published", value=published_at)
+                    embed.set_image(url=thumbnail)
+                    embed.set_footer(text="Redline Upload Alert System")
+                    await announce_ch.send(embed=embed)
+
+                if log_ch:
+                    await log_ch.send(f"📡 **NEW UPLOAD DETECTED:** {streamer_name} posted a video. `{video_url}`")
+
+                record_recent_activity(streamer_name, "upload", title, video_url, published_at[:10] if published_at != "Unknown" else "Unknown")
+
+
+@youtube_activity_poller.before_loop
+async def before_youtube_poller():
+    await bot.wait_until_ready()
+
 
 # 🚀 AUTOMATIC MEMBER JOIN GREETING & ROLE ASSIGNER
 @bot.event
@@ -174,28 +374,24 @@ async def on_message(msg):
         except Exception as e:
             print(f"Title fetch failed: {e}")
 
-        # 📅 BACKEND YOUTUBE METADATA SOURCE WORKFLOW: Scrapes page elements to pull the real YouTube Upload Date
-        youtube_upload_date_string = msg.created_at.strftime("%Y-%m-%d") 
-        thread_date_prefix = msg.created_at.strftime("%b %Y") 
+        # 📅 RELIABLE YOUTUBE PUBLISH DATE LOOKUP VIA OFFICIAL DATA API (replaces HTML scraping)
+        youtube_upload_date_string = msg.created_at.strftime("%Y-%m-%d")  # fallback only, used if API lookup fails
+        thread_date_prefix = msg.created_at.strftime("%b %Y")
         target_year_tag_name = f"{msg.created_at.year} Archive"
-        
-        try:
-            html_req = urllib.request.Request(video_url, headers={'User-Agent': 'Mozilla/5.0'})
-            with urllib.request.urlopen(html_req, timeout=5) as html_res:
-                html_text = html_res.read().decode('utf-8', errors='ignore')
-                date_match = re.search(r'"uploadDate"\s*:\s*"([^"]+)"', html_text)
-                if not date_match:
-                    date_match = re.search(r'itemprop="datePublished"\s+content="([^"]+)"', html_text)
-                
-                if date_match:
-                    raw_date_str = date_match.group(1).split("T")
-                    youtube_upload_date_string = raw_date_str[0]
-                    dt_obj = datetime.strptime(youtube_upload_date_string, "%Y-%m-%d")
+
+        video_metadata = fetch_youtube_video_metadata(video_id)
+        if video_metadata:
+            published_at_raw = video_metadata.get("snippet", {}).get("publishedAt")  # e.g. "2024-03-11T18:04:22Z"
+            if published_at_raw:
+                try:
+                    dt_obj = datetime.strptime(published_at_raw, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+                    youtube_upload_date_string = dt_obj.strftime("%Y-%m-%d")
                     thread_date_prefix = dt_obj.strftime("%b %Y")
                     target_year_tag_name = f"{dt_obj.year} Archive"
-        except Exception as e:
-            print(f"Historical upload date fetch failed: {e}")
-            print(f"Upload date fetch failed: {e}")
+                except ValueError as e:
+                    print(f"Could not parse publishedAt '{published_at_raw}': {e}")
+        else:
+            print("YouTube Data API lookup returned no metadata - falling back to Discord post date.")
 
         # 🤖 AI NATURAL LANGUAGE NLP ENGINE: Scans full text to auto-tag matching active players based on keywords
         detected_player_tags = []
@@ -231,7 +427,7 @@ async def on_message(msg):
         elif "Frenchie fan" in roles_found:
             USER_DATABASE[uid]["Frenchie"] += 1
             track_key, tracked_streamer = "Frenchie", ("Frenchie's Recon Track", USER_DATABASE[uid]["Frenchie"])
-            streamer_tag = "[物理 Frenchie (Recon Track)](https://www.youtube.com/@Frenchie)"
+            streamer_tag = "[🚓 Frenchie (Recon Track)](https://www.youtube.com/@Frenchie)"
             target_streamer_tag_name = "🚓 Frenchie"
 
         user_embed = discord.Embed(title=f"{tag_label} DETECTED", color=embed_color)
@@ -288,10 +484,23 @@ async def on_message(msg):
             log_ch = bot.get_channel(LOG_ID)
             if log_ch:
                 await log_ch.send(f"✅ **CHRONO CARD ACTIVE:** Successfully created archive thread: `{thread_title}` for member {msg.author.mention}. AI tags parsed.")
-                
+
+            if target_streamer_tag_name:
+                record_recent_activity(clean_streamer_name, "community_clip", actual_video_title, video_url, youtube_upload_date_string)
+
             try: await msg.delete()
             except: pass
 
     await bot.process_commands(msg)
 
-bot.run('MTU0Njg2Mjc1MTA5ODQ3ODY1Mg.GQXdnk.sbg8ivRsBDnQfbJrU8f7JwTf-78XAKrAs_MlIY')
+
+if __name__ == "__main__":
+    if not DISCORD_TOKEN:
+        raise RuntimeError(
+            "DISCORD_BOT_TOKEN environment variable is not set. "
+            "Set it before running the bot, e.g.:\n"
+            "  export DISCORD_BOT_TOKEN='your-token-here'   (Linux/Mac)\n"
+            "  setx DISCORD_BOT_TOKEN \"your-token-here\"      (Windows)\n"
+            "or load it from a .env file with python-dotenv."
+        )
+    bot.run(DISCORD_TOKEN)
