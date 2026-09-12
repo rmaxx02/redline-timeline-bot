@@ -15,7 +15,9 @@ load_dotenv()  # reads variables from a .env file in the same folder, if present
 # 📡 PRODUCTION CHANNEL ID MATRIX - HARDWIRED ROUTING
 LOG_ID = 1546911999051694123          # #🛠️┃bot-terminal Logs ID
 WELCOME_CH_ID = 1546898931458379907   # #📜┃rules Channel ID
-ANNOUNCE_CH_ID = 1546911191568490556  # ✅ live-clips channel
+LIVE_CH_ID = 1548192164037656607      # ✅ live streams ONLY get posted here
+UPLOAD_CH_IDS = [1546911191568490556, 1547061966520979457]  # ✅ new uploads get posted to BOTH of these
+LORE_CH_ID = 1547061966520979457      # ✅ your lore/timeline channel - watched for community links AND gets upload alerts
 
 # 🔒 HARDWIRED UNIFIED FORUM TIMELINE ENDPOINT
 FORUM_CH_ID = 1547336797724479519     # Your #📋┃timeline-archive ID
@@ -35,20 +37,27 @@ HEIST_WORDS = ["thermite", "vault", "fleeca", "paleto", "getaway", "hack", "dril
 COURT_WORDS = ["objection", "judge", "lawyer", "warrant", "subpoena", "guilty", "court", "appeal", "trial", "case", "arrested"]
 
 # 👥 AI PLAYER IDENTITIES DATABASE FOR AUTOMATIC DISCORD MEMBER TAGGING
-PLAYERS_DATABASE = {
-    "opie": "<@1547328181105860739>",      # Active tag link for Opie
-    "tray": "<@1547328294838472884>",      # Active tag link for Tray Sanders
-    "frenchie": "<@1547328384592519208>"   # Active tag link for Frenchie
-}
+# Empty for now - no real Discord User IDs available yet. Every place this dict is used
+# already handles a missing entry gracefully (falls back to no mention), so leaving it
+# empty just means the bot doesn't @mention anyone until you add real IDs later, e.g.:
+# PLAYERS_DATABASE = {"opie": "<@REAL_DISCORD_USER_ID>", "tray": "<@...>", "frenchie": "<@...>"}
+PLAYERS_DATABASE = {}
 
 # 📺 YOUTUBE CHANNEL IDS FOR LIVE/UPLOAD POLLING
 # NOTE: these must be YouTube "Channel ID" values (start with "UC..."), not @handles.
-# Find them via https://www.youtube.com/account_advanced while logged into that channel,
-# or by viewing page source of the channel and searching for "channelId".
+# Each streamer now supports MULTIPLE channels (e.g. their main channel + their "extras" channel) -
+# just add more IDs to that streamer's list. All channels in the list get polled the same way.
 STREAMER_YOUTUBE_CHANNELS = {
-    "Opie": "UC8Uy6FP4vuSA_pTRXvCJmPQ",
-    "Tray": "UCa1R0o4KutQTmi6ObmngGRQ",
-    "Frenchie": "UCcISgmobjhJQzMqXMnnzgeQ",
+    "Opie": ["UC8Uy6FP4vuSA_pTRXvCJmPQ", "UCntCTaM2Jz1sLN3iRwabpMA"],   # Elanip Extra + Elanip (main)
+    "Tray": ["UCa1R0o4KutQTmi6ObmngGRQ", "UCk9xNdmgY8im4RDCops9YYw"],   # Treyten Extra + Treyten (main)
+    "Frenchie": ["UCcISgmobjhJQzMqXMnnzgeQ"],   # ⬅️ add Frenchie's 2nd channel ID here if/when you confirm he has one
+}
+
+# 🔁 REVERSE LOOKUP - given a video's actual YouTube channel ID, find which streamer it belongs to.
+CHANNEL_ID_TO_STREAMER = {
+    channel_id: name
+    for name, channel_ids in STREAMER_YOUTUBE_CHANNELS.items()
+    for channel_id in channel_ids
 }
 
 # 📊 TRACKING DATA ARCHIVE, ANTI-DUPLICATE MEMORY & COOLDOWNS
@@ -56,9 +65,10 @@ USER_DATABASE = {}
 SPAM_COOLDOWN = {}
 PROCESSED_VIDEOS_CACHE = set()  # Brain memory cache that permanently blocks duplicate video links
 
-# 📺 LIVE/UPLOAD POLLING MEMORY (per streamer, so we don't re-announce the same video/stream)
-LAST_ANNOUNCED_VIDEO_ID = {name: None for name in STREAMER_YOUTUBE_CHANNELS}
-LAST_ANNOUNCED_LIVE_ID = {name: None for name in STREAMER_YOUTUBE_CHANNELS}
+# 📺 LIVE/UPLOAD POLLING MEMORY - tracked per INDIVIDUAL CHANNEL ID now (not per streamer name),
+# since each streamer can have more than one channel and each needs its own "last seen" memory.
+LAST_ANNOUNCED_VIDEO_ID = {channel_id: None for channel_id in CHANNEL_ID_TO_STREAMER}
+LAST_ANNOUNCED_LIVE_ID = {channel_id: None for channel_id in CHANNEL_ID_TO_STREAMER}
 
 # 🧵 RECENT ACTIVITY MEMORY - keeps the last 8 known video/live events per streamer, newest first.
 # (Not currently used for anything beyond bookkeeping - reserved for a future feature.)
@@ -186,75 +196,93 @@ async def status_rotator():
 # 📺 AUTOMATED YOUTUBE LIVE / NEW-UPLOAD ANNOUNCEMENT LOOP
 @tasks.loop(minutes=5)
 async def youtube_activity_poller():
-    announce_ch = bot.get_channel(ANNOUNCE_CH_ID)
+    live_ch = bot.get_channel(LIVE_CH_ID)
+    upload_channels = [ch for ch in (bot.get_channel(cid) for cid in UPLOAD_CH_IDS) if ch]
     log_ch = bot.get_channel(LOG_ID)
 
-    for streamer_name, channel_id in STREAMER_YOUTUBE_CHANNELS.items():
-        if "UCXXXX" in channel_id or "UCYYYY" in channel_id or "UCZZZZ" in channel_id:
-            # Placeholder channel ID not yet configured - skip silently.
-            continue
+    for streamer_name, channel_ids in STREAMER_YOUTUBE_CHANNELS.items():
+        for channel_id in channel_ids:
+            if "UCXXXX" in channel_id or "UCYYYY" in channel_id or "UCZZZZ" in channel_id:
+                # Placeholder channel ID not yet configured - skip silently.
+                continue
 
-        latest_video, live_video = fetch_latest_channel_activity(channel_id)
+            latest_video, live_video = fetch_latest_channel_activity(channel_id)
 
-        # --- Live broadcast check ---
-        if live_video:
-            live_video_id = live_video["id"]["videoId"]
-            if LAST_ANNOUNCED_LIVE_ID.get(streamer_name) != live_video_id:
-                LAST_ANNOUNCED_LIVE_ID[streamer_name] = live_video_id
-                title = live_video["snippet"]["title"]
-                thumbnail = live_video["snippet"]["thumbnails"]["high"]["url"]
-                video_url = f"https://www.youtube.com/watch?v={live_video_id}"
+            # --- Live broadcast check ---
+            if live_video:
+                live_video_id = live_video["id"]["videoId"]
+                if LAST_ANNOUNCED_LIVE_ID.get(channel_id) != live_video_id:
+                    LAST_ANNOUNCED_LIVE_ID[channel_id] = live_video_id
+                    title = live_video["snippet"]["title"]
+                    thumbnail = live_video["snippet"]["thumbnails"]["high"]["url"]
+                    video_url = f"https://www.youtube.com/watch?v={live_video_id}"
 
-                if announce_ch:
+                    # Pull the real description straight from YouTube for this live broadcast
+                    live_metadata = fetch_youtube_video_metadata(live_video_id)
+                    live_description = ""
+                    if live_metadata:
+                        live_description = live_metadata.get("snippet", {}).get("description", "")[:400]
+
                     streamer_mention = PLAYERS_DATABASE.get(streamer_name.lower(), "")
                     embed = discord.Embed(
                         title=f"🔴 {streamer_name} IS LIVE NOW",
-                        description=title,
+                        description=f"**{title}**\n\n{live_description}".strip(),
                         url=video_url,
                         color=0xff0000,
                     )
                     embed.set_image(url=thumbnail)
                     embed.set_footer(text="Redline Live Alert System")
                     alert_content = f"@here {streamer_mention}".strip()
-                    await announce_ch.send(content=alert_content, embed=embed)
 
-                if log_ch:
-                    await log_ch.send(f"📡 **LIVE DETECTED:** {streamer_name} started streaming. `{video_url}`")
+                    if live_ch:
+                        await live_ch.send(content=alert_content, embed=embed)
 
-                record_recent_activity(streamer_name, "live", title, video_url,
-                                        datetime.now(timezone.utc).strftime("%Y-%m-%d"))
+                    if log_ch:
+                        await log_ch.send(f"📡 **LIVE DETECTED:** {streamer_name} started streaming. `{video_url}`")
 
-        # --- New upload check ---
-        if latest_video:
-            video_id = latest_video["id"]["videoId"]
-            if LAST_ANNOUNCED_VIDEO_ID.get(streamer_name) is None:
-                # First run for this streamer: just record the current latest video,
-                # don't announce it (avoids blasting old content on bot startup).
-                LAST_ANNOUNCED_VIDEO_ID[streamer_name] = video_id
-            elif LAST_ANNOUNCED_VIDEO_ID.get(streamer_name) != video_id:
-                LAST_ANNOUNCED_VIDEO_ID[streamer_name] = video_id
-                title = latest_video["snippet"]["title"]
-                thumbnail = latest_video["snippet"]["thumbnails"]["high"]["url"]
-                video_url = f"https://www.youtube.com/watch?v={video_id}"
-                published_at = latest_video["snippet"].get("publishedAt", "Unknown")
+                    record_recent_activity(streamer_name, "live", title, video_url,
+                                            datetime.now(timezone.utc).strftime("%Y-%m-%d"))
 
-                if announce_ch:
+            # --- New upload check ---
+            if latest_video:
+                video_id = latest_video["id"]["videoId"]
+                if LAST_ANNOUNCED_VIDEO_ID.get(channel_id) is None:
+                    # First run for this channel: just record the current latest video,
+                    # don't announce it (avoids blasting old content on bot startup).
+                    LAST_ANNOUNCED_VIDEO_ID[channel_id] = video_id
+                elif LAST_ANNOUNCED_VIDEO_ID.get(channel_id) != video_id:
+                    LAST_ANNOUNCED_VIDEO_ID[channel_id] = video_id
+                    title = latest_video["snippet"]["title"]
+                    thumbnail = latest_video["snippet"]["thumbnails"]["high"]["url"]
+                    video_url = f"https://www.youtube.com/watch?v={video_id}"
+
+                    # Pull the real publish date + full description from the official API
+                    upload_metadata = fetch_youtube_video_metadata(video_id)
+                    published_at = "Unknown"
+                    video_description = ""
+                    if upload_metadata:
+                        published_at = upload_metadata.get("snippet", {}).get("publishedAt", "Unknown")
+                        video_description = upload_metadata.get("snippet", {}).get("description", "")[:400]
+
                     streamer_mention = PLAYERS_DATABASE.get(streamer_name.lower(), "")
                     embed = discord.Embed(
                         title=f"📹 {streamer_name} JUST POSTED A NEW VIDEO",
-                        description=title,
+                        description=f"**{title}**\n\n{video_description}".strip(),
                         url=video_url,
                         color=0x39ff14,
                     )
                     embed.add_field(name="📅 Published", value=published_at)
                     embed.set_image(url=thumbnail)
                     embed.set_footer(text="Redline Upload Alert System")
-                    await announce_ch.send(content=streamer_mention or None, embed=embed)
 
-                if log_ch:
-                    await log_ch.send(f"📡 **NEW UPLOAD DETECTED:** {streamer_name} posted a video. `{video_url}`")
+                    # Uploads go to BOTH configured upload channels (one of which is your lore channel)
+                    for target_ch in upload_channels:
+                        await target_ch.send(content=streamer_mention or None, embed=embed)
 
-                record_recent_activity(streamer_name, "upload", title, video_url, published_at[:10] if published_at != "Unknown" else "Unknown")
+                    if log_ch:
+                        await log_ch.send(f"📡 **NEW UPLOAD DETECTED:** {streamer_name} posted a video. `{video_url}`")
+
+                    record_recent_activity(streamer_name, "upload", title, video_url, published_at[:10] if published_at != "Unknown" else "Unknown")
 
 
 @youtube_activity_poller.before_loop
@@ -335,7 +363,7 @@ async def on_message(msg):
     content_lower = msg.content.lower()
     
     yt_match = re.search(r'(https?://(?:www\.)?(?:youtube\.com/watch\?v=|youtu\.be/)([a-zA-Z0-9_-]{11}))', msg.content)
-    if yt_match:
+    if yt_match and msg.channel.id == LORE_CH_ID:
         video_url = yt_match.group(1)
         video_id = yt_match.group(2)
         uid = msg.author.id
@@ -383,8 +411,10 @@ async def on_message(msg):
         target_year_tag_name = f"{msg.created_at.year} Archive"
 
         video_metadata = fetch_youtube_video_metadata(video_id)
+        source_channel_id = None
         if video_metadata:
             published_at_raw = video_metadata.get("snippet", {}).get("publishedAt")  # e.g. "2024-03-11T18:04:22Z"
+            source_channel_id = video_metadata.get("snippet", {}).get("channelId")
             if published_at_raw:
                 try:
                     dt_obj = datetime.strptime(published_at_raw, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
@@ -415,44 +445,48 @@ async def on_message(msg):
 
         if uid not in USER_DATABASE: USER_DATABASE[uid] = {"Opie": 0, "Tray": 0, "Frenchie": 0}
         member, roles_found = msg.author, [r.name for r in msg.author.roles]
-        tracked_streamer, streamer_tag, track_key, target_streamer_tag_name = None, "Unknown Operative", None, None
-        
-        if "Opie fan" in roles_found:
-            USER_DATABASE[uid]["Opie"] += 1
-            track_key, tracked_streamer = "Opie", ("Opie's Driver Track", USER_DATABASE[uid]["Opie"])
-            streamer_tag = "[🏎️ Opie (Driver Track)](https://www.youtube.com/@Opie)"
-            target_streamer_tag_name = "🏎️ Opie"
-        elif "Tray fan" in roles_found:
-            USER_DATABASE[uid]["Tray"] += 1
-            track_key, tracked_streamer = "Tray", ("Tray Sander's Hacker Track", USER_DATABASE[uid]["Tray"])
-            streamer_tag = "[💻 Tray (Hacker Track)](https://www.youtube.com/@Tray)"
-            target_streamer_tag_name = "💻 Tray"
-        elif "Frenchie fan" in roles_found:
-            USER_DATABASE[uid]["Frenchie"] += 1
-            track_key, tracked_streamer = "Frenchie", ("Frenchie's Recon Track", USER_DATABASE[uid]["Frenchie"])
-            streamer_tag = "[🚓 Frenchie (Recon Track)](https://www.youtube.com/@Frenchie)"
-            target_streamer_tag_name = "🚓 Frenchie"
+        track_emoji_map = {"Opie": "🏎️", "Tray": "💻", "Frenchie": "🚓"}
+
+        # 🎯 VIDEO-SOURCE TRACKING - the point goes to whichever streamer's own YouTube
+        # channel this video actually came from, regardless of the poster's own roles.
+        matched_track = CHANNEL_ID_TO_STREAMER.get(source_channel_id) if source_channel_id else None
+
+        # Fallback if the API lookup didn't return a channel ID for some reason:
+        # guess from keywords in the message/title so a submission still gets credited.
+        if not matched_track:
+            if "opie" in combined_metadata_text:
+                matched_track = "Opie"
+            elif "tray" in combined_metadata_text:
+                matched_track = "Tray"
+            elif "frenchie" in combined_metadata_text:
+                matched_track = "Frenchie"
+
+        if matched_track:
+            USER_DATABASE[uid][matched_track] += 1
 
         user_embed = discord.Embed(title=f"{tag_label} DETECTED", color=embed_color)
-        user_embed.add_field(name="🎬 Track Perspective", value=streamer_tag, inline=True)
-        user_embed.add_field(name="📅 YouTube Upload Date", value=f"📆 **{youtube_upload_date_string}**", inline=True) 
-        user_embed.add_field(name="👥 Auto-Tagged Players In Video", value=tagged_players_output_string, inline=False) 
+        user_embed.add_field(name="📅 YouTube Upload Date", value=f"📆 **{youtube_upload_date_string}**", inline=True)
+        user_embed.add_field(name="👥 Auto-Tagged Players In Video", value=tagged_players_output_string, inline=False)
         user_embed.add_field(name="📥 Submission Link", value=video_url, inline=False)
         user_embed.add_field(name="👤 Filed By", value=msg.author.mention, inline=True)
 
         if video_thumbnail_url:
             user_embed.set_image(url=video_thumbnail_url) 
 
-        if tracked_streamer:
-            track_title, track_count = tracked_streamer
-            user_embed.add_field(name="📊 Score Progression", value=f"{track_title}: **{track_count} clips**", inline=True)
-            
+        if matched_track:
+            track_count = USER_DATABASE[uid][matched_track]
+            user_embed.add_field(
+                name="📊 Score Progression",
+                value=f"{track_emoji_map[matched_track]} {matched_track}: **{track_count} clips**",
+                inline=True,
+            )
+
             rank_map = {
                 "Opie": [(90, "Wheelman"), (60, "Getaway Driver"), (40, "Street Racer"), (10, "Grease Monkey")],
                 "Tray": [(90, "Master Hacker"), (60, "Elite Hacker"), (40, "Green Hat"), (10, "Script Kiddie")],
                 "Frenchie": [(90, "Ghost Operator"), (60, "Infiltrator"), (40, "Scout"), (10, "Lookout")]
             }
-            for milestone, rank_name in rank_map[track_key]:
+            for milestone, rank_name in rank_map[matched_track]:
                 if track_count >= milestone:
                     if rank_name not in roles_found:
                         role = discord.utils.get(member.guild.roles, name=rank_name)
@@ -463,23 +497,13 @@ async def on_message(msg):
 
         forum_channel = bot.get_channel(FORUM_CH_ID)
         if forum_channel and isinstance(forum_channel, discord.ForumChannel):
-            # Smart text scanners to automatically detect and auto-press matching streamer button tags based on keywords found
-            detected_streamer_tag = None
-            if "opie" in combined_metadata_text:
-                detected_streamer_tag = "🏎️ Opie"
-            elif "tray" in combined_metadata_text:
-                detected_streamer_tag = "💻 Tray"
-            elif "frenchie" in combined_metadata_text:
-                detected_streamer_tag = "🚓 Frenchie"
-            else:
-                detected_streamer_tag = target_streamer_tag_name
-
             applied_tags = [
-                t for t in forum_channel.available_tags 
-                if t.name in [target_tag_name, detected_streamer_tag, target_year_tag_name]
+                t for t in forum_channel.available_tags
+                if t.name == target_tag_name or t.name == target_year_tag_name
+                or (matched_track and t.name == f"{track_emoji_map[matched_track]} {matched_track}")
             ]
-            
-            clean_streamer_name = target_streamer_tag_name.replace("🏎️ ", "").replace("💻 ", "").replace("🚓 ", "") if target_streamer_tag_name else "Unknown"
+
+            clean_streamer_name = matched_track if matched_track else "Unknown"
             thread_title = f"[{thread_date_prefix}] {clean_streamer_name} | {actual_video_title[:45]}"
             
             await forum_channel.create_thread(name=thread_title, embed=user_embed, applied_tags=applied_tags)
@@ -488,11 +512,8 @@ async def on_message(msg):
             if log_ch:
                 await log_ch.send(f"✅ **CHRONO CARD ACTIVE:** Successfully created archive thread: `{thread_title}` for member {msg.author.mention}. AI tags parsed.")
 
-            if target_streamer_tag_name:
-                record_recent_activity(clean_streamer_name, "community_clip", actual_video_title, video_url, youtube_upload_date_string)
-
-            try: await msg.delete()
-            except: pass
+            if matched_track:
+                record_recent_activity(matched_track, "community_clip", actual_video_title, video_url, youtube_upload_date_string)
 
     await bot.process_commands(msg)
 
