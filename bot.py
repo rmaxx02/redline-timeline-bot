@@ -15,7 +15,7 @@ load_dotenv()  # reads variables from a .env file in the same folder, if present
 # 📡 PRODUCTION CHANNEL ID MATRIX - HARDWIRED ROUTING
 LOG_ID = 1546911999051694123          # #🛠️┃bot-terminal Logs ID
 WELCOME_CH_ID = 1546898931458379907   # #📜┃rules Channel ID
-ANNOUNCE_CH_ID = 1546911999051694123  # ⬅️ REPLACE with the channel ID for "went live / new upload" announcements
+ANNOUNCE_CH_ID = 1546911191568490556  # ✅ live-clips channel
 
 # 🔒 HARDWIRED UNIFIED FORUM TIMELINE ENDPOINT
 FORUM_CH_ID = 1547336797724479519     # Your #📋┃timeline-archive ID
@@ -206,6 +206,7 @@ async def youtube_activity_poller():
                 video_url = f"https://www.youtube.com/watch?v={live_video_id}"
 
                 if announce_ch:
+                    streamer_mention = PLAYERS_DATABASE.get(streamer_name.lower(), "")
                     embed = discord.Embed(
                         title=f"🔴 {streamer_name} IS LIVE NOW",
                         description=title,
@@ -214,7 +215,8 @@ async def youtube_activity_poller():
                     )
                     embed.set_image(url=thumbnail)
                     embed.set_footer(text="Redline Live Alert System")
-                    await announce_ch.send(content="@here", embed=embed)
+                    alert_content = f"@here {streamer_mention}".strip()
+                    await announce_ch.send(content=alert_content, embed=embed)
 
                 if log_ch:
                     await log_ch.send(f"📡 **LIVE DETECTED:** {streamer_name} started streaming. `{video_url}`")
@@ -237,6 +239,7 @@ async def youtube_activity_poller():
                 published_at = latest_video["snippet"].get("publishedAt", "Unknown")
 
                 if announce_ch:
+                    streamer_mention = PLAYERS_DATABASE.get(streamer_name.lower(), "")
                     embed = discord.Embed(
                         title=f"📹 {streamer_name} JUST POSTED A NEW VIDEO",
                         description=title,
@@ -246,7 +249,7 @@ async def youtube_activity_poller():
                     embed.add_field(name="📅 Published", value=published_at)
                     embed.set_image(url=thumbnail)
                     embed.set_footer(text="Redline Upload Alert System")
-                    await announce_ch.send(embed=embed)
+                    await announce_ch.send(content=streamer_mention or None, embed=embed)
 
                 if log_ch:
                     await log_ch.send(f"📡 **NEW UPLOAD DETECTED:** {streamer_name} posted a video. `{video_url}`")
