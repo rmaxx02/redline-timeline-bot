@@ -4,12 +4,14 @@ import discord
 from discord.ext import commands, tasks
 import asyncio
 import random
+import io
 from datetime import datetime, timezone
 from collections import deque
 import re
 import urllib.request
 import urllib.parse
 import json
+from PIL import Image, ImageDraw, ImageFont
 
 load_dotenv()  # reads variables from a .env file in the same folder, if present
 
@@ -110,6 +112,14 @@ CHANNEL_ID_TO_STREAMER = {
     channel_id: name
     for name, channel_ids in STREAMER_YOUTUBE_CHANNELS.items()
     for channel_id in channel_ids
+}
+
+# 🏆 SHARED TRACK/RANK CONSTANTS - used by the message handler AND commands like !rank, !addpoint
+TRACK_EMOJI_MAP = {"Opie": "🏎️", "Tray": "💻", "Frenchie": "🚓"}
+RANK_MAP = {
+    "Opie": [(500, "Wheelman"), (250, "Getaway Driver"), (100, "Street Racer"), (25, "Grease Monkey")],
+    "Tray": [(500, "Master Hacker"), (250, "Elite Hacker"), (100, "Green Hat"), (25, "Script Kiddie")],
+    "Frenchie": [(500, "Ghost Operator"), (250, "Infiltrator"), (100, "Scout"), (25, "Lookout")],
 }
 
 # 📊 TRACKING DATA ARCHIVE, ANTI-DUPLICATE MEMORY & COOLDOWNS
@@ -462,8 +472,81 @@ def make_progress_bar(value: int, total: int, length: int = 12) -> str:
     return "█" * filled + "░" * (length - filled)
 
 
-@tasks.loop(hours=24)
-async def daily_recap():
+# 🤠 WANTED POSTER GENERATOR - procedurally drawn frame (no external template needed),
+# with the target's real Discord avatar composited into the middle.
+WANTED_CHARGES = [
+    "Grand Theft Auto", "Evading Police", "Reckless Driving", "Bank Robbery",
+    "Vault Cracking", "Gang Activity", "Resisting Arrest", "Illegal Racing",
+    "Breaking & Entering", "Assault on an Officer", "Hacking Municipal Systems",
+]
+
+
+def _get_poster_font(size: int, bold: bool = True):
+    candidates = [
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf" if bold else "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
+    ]
+    for path in candidates:
+        try:
+            return ImageFont.truetype(path, size)
+        except Exception:
+            continue
+    return ImageFont.load_default()
+
+
+def generate_wanted_poster(avatar_bytes: bytes, display_name: str) -> io.BytesIO:
+    """Builds a wanted-poster PNG with the given avatar image and name, returns it as an in-memory buffer."""
+    W, H = 600, 800
+    border_color = (60, 35, 20)
+
+    bg = Image.new("RGB", (W, H), (222, 197, 145))
+    noise = Image.effect_noise((W, H), 24).convert("L")
+    bg = Image.composite(Image.new("RGB", (W, H), (200, 170, 110)), bg, noise.point(lambda p: 60 if p > 200 else 0))
+    draw = ImageDraw.Draw(bg)
+
+    draw.rectangle([15, 15, W - 15, H - 15], outline=border_color, width=8)
+    draw.rectangle([28, 28, W - 28, H - 28], outline=border_color, width=2)
+
+    font_wanted = _get_poster_font(90)
+    text_w = draw.textlength("WANTED", font=font_wanted)
+    draw.text(((W - text_w) / 2, 45), "WANTED", font=font_wanted, fill=border_color)
+
+    avatar_size = 300
+    avatar_pos = ((W - avatar_size) // 2, 190)
+    try:
+        avatar_img = Image.open(io.BytesIO(avatar_bytes)).convert("RGB").resize((avatar_size, avatar_size))
+        avatar_img = avatar_img.convert("L").convert("RGB")  # grayscale for that old-timey mugshot look
+        bg.paste(avatar_img, avatar_pos)
+    except Exception as e:
+        print(f"Wanted poster avatar processing failed: {e}")
+        placeholder = Image.new("RGB", (avatar_size, avatar_size), (120, 120, 120))
+        bg.paste(placeholder, avatar_pos)
+    draw.rectangle([avatar_pos[0], avatar_pos[1], avatar_pos[0] + avatar_size, avatar_pos[1] + avatar_size], outline=border_color, width=6)
+
+    font_name = _get_poster_font(min(44, int(2000 / max(len(display_name), 1))))
+    name_w = draw.textlength(display_name, font=font_name)
+    draw.text(((W - name_w) / 2, 505), display_name, font=font_name, fill=border_color)
+
+    font_reward = _get_poster_font(30)
+    reward_text = f"REWARD: ${random.randint(5, 95) * 1000:,}"
+    reward_w = draw.textlength(reward_text, font=font_reward)
+    draw.text(((W - reward_w) / 2, 565), reward_text, font=font_reward, fill=(120, 20, 20))
+
+    font_charge = _get_poster_font(20, bold=False)
+    charges = ", ".join(random.sample(WANTED_CHARGES, 2))
+    charge_text = f"CHARGES: {charges}"
+    if draw.textlength(charge_text, font=font_charge) > W - 60:
+        charge_text = charges  # drop the prefix if it doesn't fit
+    charge_w = draw.textlength(charge_text, font=font_charge)
+    draw.text(((W - charge_w) / 2, 625), charge_text, font=font_charge, fill=border_color)
+
+    buffer = io.BytesIO()
+    bg.save(buffer, format="PNG")
+    buffer.seek(0)
+    return buffer
+
+
+async def send_daily_recap():
     recap_ch = bot.get_channel(DAILY_RECAP_CH_ID)
     if not recap_ch:
         print("Daily recap channel not found - check DAILY_RECAP_CH_ID.")
@@ -562,6 +645,11 @@ async def daily_recap():
     await recap_ch.send(embed=embed)
 
     reset_daily_stats()
+
+
+@tasks.loop(hours=24)
+async def daily_recap():
+    await send_daily_recap()
 
 
 @daily_recap.before_loop
@@ -699,42 +787,46 @@ async def on_member_join(member):
         pass
 
 # 📊 UPGRADED LEADERBOARD STATS COMMAND
+async def send_leaderboard(ctx):
+    if not USER_DATABASE:
+        await ctx.send("📊 **Scoreboard Empty:** No clips have been logged in the archive yet!")
+        return
+
+    leaderboard_data = []
+    for uid, data in USER_DATABASE.items():
+        total_clips = data.get("Opie", 0) + data.get("Tray", 0) + data.get("Frenchie", 0)
+        if total_clips == 0:
+            continue
+        user_obj = ctx.guild.get_member(uid) or await bot.fetch_user(uid)
+        user_name = user_obj.name if user_obj else f"User {uid}"
+        leaderboard_data.append((total_clips, user_name, data.get("Opie", 0), data.get("Tray", 0), data.get("Frenchie", 0)))
+
+    if not leaderboard_data:
+        await ctx.send("📊 **Scoreboard Empty:** No clips have been logged in the archive yet!")
+        return
+
+    leaderboard_data.sort(key=lambda x: x[0], reverse=True)  # sort by total clips, highest first
+
+    medals = ["🥇", "🥈", "🥉", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟"]
+    embed = discord.Embed(
+        title="🏆 REDLINE ALL-TIME LEADERBOARD 🏆",
+        description=f"The top {min(10, len(leaderboard_data))} chronological timeline contributors, out of **{len(leaderboard_data)}** total.",
+        color=0xd4af37,
+    )
+    for i, (total, name, opie_pts, tray_pts, frenchie_pts) in enumerate(leaderboard_data[:10]):
+        embed.add_field(
+            name=f"{medals[i]} {name} — {total} clips",
+            value=f"🏎️ Opie: *{opie_pts}* | 💻 Tray: *{tray_pts}* | 🚓 Frenchie: *{frenchie_pts}*",
+            inline=False
+        )
+    embed.set_footer(text="Keep submitting clips to climb the ranks!")
+    await ctx.send(embed=embed)
+
+
 @bot.command()
 async def stats(ctx, *, option: str = None):
     if option and option.lower() == "leaderboard":
-        if not USER_DATABASE:
-            await ctx.send("📊 **Scoreboard Empty:** No clips have been logged in the archive yet!")
-            return
-
-        leaderboard_data = []
-        for uid, data in USER_DATABASE.items():
-            total_clips = data.get("Opie", 0) + data.get("Tray", 0) + data.get("Frenchie", 0)
-            if total_clips == 0:
-                continue
-            user_obj = ctx.guild.get_member(uid) or await bot.fetch_user(uid)
-            user_name = user_obj.name if user_obj else f"User {uid}"
-            leaderboard_data.append((total_clips, user_name, data.get("Opie", 0), data.get("Tray", 0), data.get("Frenchie", 0)))
-
-        if not leaderboard_data:
-            await ctx.send("📊 **Scoreboard Empty:** No clips have been logged in the archive yet!")
-            return
-
-        leaderboard_data.sort(key=lambda x: x[0], reverse=True)  # sort by total clips, highest first
-
-        medals = ["🥇", "🥈", "🥉", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟"]
-        embed = discord.Embed(
-            title="🏆 REDLINE ALL-TIME LEADERBOARD 🏆",
-            description=f"The top {min(10, len(leaderboard_data))} chronological timeline contributors, out of **{len(leaderboard_data)}** total.",
-            color=0xd4af37,
-        )
-        for i, (total, name, opie_pts, tray_pts, frenchie_pts) in enumerate(leaderboard_data[:10]):
-            embed.add_field(
-                name=f"{medals[i]} {name} — {total} clips",
-                value=f"🏎️ Opie: *{opie_pts}* | 💻 Tray: *{tray_pts}* | 🚓 Frenchie: *{frenchie_pts}*",
-                inline=False
-            )
-        embed.set_footer(text="Keep submitting clips to climb the ranks!")
-        await ctx.send(embed=embed)
+        await send_leaderboard(ctx)
         return
 
     uid = ctx.author.id
@@ -762,8 +854,13 @@ async def help(ctx):
         name="💬 Commands",
         value=(
             "`!help` — shows this guide\n"
-            "`!stats` — shows YOUR OWN clip counts for Opie / Tray / Frenchie\n"
-            "`!stats leaderboard` — shows the server's top 5 contributors overall"
+            "`!stats` — your own clip counts for Opie / Tray / Frenchie\n"
+            "`!stats leaderboard` or `!leaderboard` — top 10 server-wide\n"
+            "`!rank` — how many clips until your next rank-up\n"
+            "`!milestone` — progress toward the next server-wide celebration\n"
+            "`!opie` / `!tray` / `!frenchie` — that streamer's most recent activity\n"
+            "`!wanted [@user]` — generates a fun wanted poster for yourself or someone else\n"
+            "`!scanner` — random GTA-style police radio chatter"
         ),
         inline=False,
     )
@@ -847,6 +944,11 @@ async def help(ctx):
         inline=False,
     )
     ranks_embed.add_field(
+        name="💰 Heist Announcements (staff only)",
+        value="Staff can run `!heist [description]` to post a stylized heist-in-progress announcement with an @here ping.",
+        inline=False,
+    )
+    ranks_embed.add_field(
         name="🎮 Picking Your Team",
         value="Use the buttons on the welcome message when you join to instantly pick Opie / Tray / Frenchie as your team - no need to hunt for a separate channel.",
         inline=False,
@@ -859,6 +961,216 @@ async def help(ctx):
     ranks_embed.set_footer(text="Questions? Ask a server admin.")
 
     await ctx.send(embeds=[overview_embed, ranks_embed])
+
+
+# ⚡ !rank - shows how many clips are needed until your next rank-up, per track
+@bot.command()
+async def rank(ctx):
+    uid = ctx.author.id
+    user_data = USER_DATABASE.get(uid, {"Opie": 0, "Tray": 0, "Frenchie": 0})
+
+    embed = discord.Embed(title=f"⚡ {ctx.author.name}'s Rank Progress", color=0x1abc9c)
+    for track in ("Opie", "Tray", "Frenchie"):
+        count = user_data.get(track, 0)
+        tiers = sorted(RANK_MAP[track])  # ascending: (25, name), (100, name), (250, name), (500, name)
+        next_tier = next((t for t in tiers if count < t[0]), None)
+        current_rank = None
+        for milestone, rank_name in reversed(tiers):
+            if count >= milestone:
+                current_rank = rank_name
+                break
+
+        if next_tier is None:
+            status = f"🏆 **MAX RANK** ({current_rank}) — {count} clips"
+        else:
+            remaining = next_tier[0] - count
+            rank_line = f"Currently: **{current_rank}**\n" if current_rank else ""
+            status = f"{rank_line}{remaining} more clip(s) until **{next_tier[1]}**"
+        embed.add_field(name=f"{TRACK_EMOJI_MAP[track]} {track}", value=status, inline=False)
+
+    await ctx.send(embed=embed)
+
+
+# 📋 !leaderboard - shortcut for "!stats leaderboard"
+@bot.command()
+async def leaderboard(ctx):
+    await stats(ctx, option="leaderboard")
+
+
+# 📺 !opie / !tray / !frenchie - quick check on a streamer's most recent known activity
+async def _streamer_recent_activity(ctx, streamer_name: str):
+    events = RECENT_VIDEOS_LOG.get(streamer_name)
+    if not events:
+        await ctx.send(f"{TRACK_EMOJI_MAP[streamer_name]} No recent activity recorded for **{streamer_name}** yet.")
+        return
+    embed = discord.Embed(title=f"{TRACK_EMOJI_MAP[streamer_name]} {streamer_name} - Recent Activity", color=0x3498db)
+    for e in list(events)[:5]:
+        embed.add_field(name=f"[{e['kind'].upper()}] {e['date']}", value=f"[{e['title'][:60]}]({e['url']})", inline=False)
+    await ctx.send(embed=embed)
+
+
+@bot.command()
+async def opie(ctx):
+    await _streamer_recent_activity(ctx, "Opie")
+
+
+@bot.command()
+async def tray(ctx):
+    await _streamer_recent_activity(ctx, "Tray")
+
+
+@bot.command()
+async def frenchie(ctx):
+    await _streamer_recent_activity(ctx, "Frenchie")
+
+
+# 🎯 !milestone - shows progress toward the next server-wide milestone celebration
+@bot.command()
+async def milestone(ctx):
+    next_milestone = ((TOTAL_CLIPS_ALL_TIME // MILESTONE_STEP) + 1) * MILESTONE_STEP
+    remaining = next_milestone - TOTAL_CLIPS_ALL_TIME
+    embed = discord.Embed(
+        title="🎯 Milestone Tracker",
+        description=(
+            f"**{TOTAL_CLIPS_ALL_TIME}** total clips archived server-wide.\n"
+            f"{make_progress_bar(TOTAL_CLIPS_ALL_TIME % MILESTONE_STEP, MILESTONE_STEP, 16)}\n"
+            f"**{remaining}** more clip(s) until the next celebration at **{next_milestone}**! 🎉"
+        ),
+        color=0xffd700,
+    )
+    await ctx.send(embed=embed)
+
+
+# 🔁 !recap - manually re-post the daily recap on demand (staff only, since it also resets the day's counters)
+@bot.command()
+@commands.has_permissions(manage_guild=True)
+async def recap(ctx):
+    await ctx.send("🌙 Generating the daily recap now...")
+    await send_daily_recap()
+
+
+# 🛠️ ADMIN COMMANDS - all require Manage Server permission
+@bot.command()
+@commands.has_permissions(manage_guild=True)
+async def addpoint(ctx, member: discord.Member, track: str):
+    track = track.strip().capitalize()
+    if track not in ("Opie", "Tray", "Frenchie"):
+        await ctx.send("⚠️ Track must be one of: `Opie`, `Tray`, `Frenchie`.")
+        return
+    if member.id not in USER_DATABASE:
+        USER_DATABASE[member.id] = {"Opie": 0, "Tray": 0, "Frenchie": 0}
+    USER_DATABASE[member.id][track] += 1
+    new_count = USER_DATABASE[member.id][track]
+    await ctx.send(f"✅ Added 1 point to {member.mention}'s **{track}** track. New total: **{new_count}**.")
+
+
+@bot.command()
+@commands.has_permissions(manage_guild=True)
+async def removepoint(ctx, member: discord.Member, track: str):
+    track = track.strip().capitalize()
+    if track not in ("Opie", "Tray", "Frenchie"):
+        await ctx.send("⚠️ Track must be one of: `Opie`, `Tray`, `Frenchie`.")
+        return
+    if member.id not in USER_DATABASE:
+        USER_DATABASE[member.id] = {"Opie": 0, "Tray": 0, "Frenchie": 0}
+    USER_DATABASE[member.id][track] = max(0, USER_DATABASE[member.id][track] - 1)
+    new_count = USER_DATABASE[member.id][track]
+    await ctx.send(f"✅ Removed 1 point from {member.mention}'s **{track}** track. New total: **{new_count}**.")
+
+
+@bot.command()
+@commands.has_permissions(manage_guild=True)
+async def resetstats(ctx, target: str):
+    if target.lower() == "all":
+        USER_DATABASE.clear()
+        await ctx.send("🧹 Wiped the entire leaderboard. Everyone starts fresh.")
+        return
+    try:
+        member = await commands.MemberConverter().convert(ctx, target)
+    except commands.MemberNotFound:
+        await ctx.send("⚠️ Couldn't find that member. Use `!resetstats @user` or `!resetstats all`.")
+        return
+    USER_DATABASE[member.id] = {"Opie": 0, "Tray": 0, "Frenchie": 0}
+    await ctx.send(f"🧹 Reset {member.mention}'s stats back to zero.")
+
+
+# 🤠 !wanted @user - generates a fun wanted poster using their real Discord avatar
+@bot.command()
+async def wanted(ctx, member: discord.Member = None):
+    target = member or ctx.author
+    try:
+        avatar_bytes = await target.display_avatar.replace(size=256).read()
+    except Exception as e:
+        await ctx.send(f"⚠️ Couldn't fetch {target.mention}'s avatar right now - try again in a moment.")
+        print(f"Wanted poster avatar fetch failed: {e}")
+        return
+
+    poster_buffer = generate_wanted_poster(avatar_bytes, target.display_name)
+    file = discord.File(fp=poster_buffer, filename="wanted.png")
+    embed = discord.Embed(
+        title=f"🚨 WANTED: {target.display_name} 🚨",
+        description="Last seen causing chaos on the streets of Redline. Approach with caution.",
+        color=0x8b4513,
+    )
+    embed.set_image(url="attachment://wanted.png")
+    await ctx.send(embed=embed, file=file)
+
+
+# 📻 !scanner - random GTA-style police radio chatter for atmosphere
+SCANNER_LINES = [
+    "🚔 10-4, unit responding to a 211 in progress downtown.",
+    "📻 *static* ...suspect vehicle last seen heading north on the highway...",
+    "🚨 All units, BOLO for a black sedan involved in a hit and run.",
+    "📻 Dispatch, we've got shots fired near the docks, requesting backup.",
+    "🚔 Suspect is on foot, repeat, suspect is on foot near the train yard.",
+    "📻 *static* ...vault silent alarm triggered at the downtown bank...",
+    "🚨 Units be advised, high speed pursuit heading toward the freeway on-ramp.",
+    "📻 Dispatch, we have a 10-15, one in custody, requesting a transport unit.",
+    "🚔 Air support requested, suspects fleeing in multiple vehicles.",
+    "📻 *static* ...be advised, armed and considered dangerous...",
+]
+
+
+@bot.command()
+async def scanner(ctx):
+    await ctx.send(random.choice(SCANNER_LINES))
+
+
+# 💰 !heist - staff-triggered stylized heist announcement
+HEIST_INTROS = [
+    "🚨 ALARM TRIPPED",
+    "💰 VAULT CRACKING IN PROGRESS",
+    "🔓 SECURITY SYSTEMS DOWN",
+    "🏦 BREACH DETECTED",
+]
+
+
+@bot.command()
+@commands.has_permissions(manage_guild=True)
+async def heist(ctx, *, description: str = "A heist is going down RIGHT NOW."):
+    embed = discord.Embed(
+        title=random.choice(HEIST_INTROS),
+        description=f"# 💰 HEIST IN PROGRESS 💰\n{description}",
+        color=0x39ff14,
+    )
+    embed.set_footer(text="Get in position. This one's live.")
+    await ctx.send(content="@here", embed=embed)
+
+
+# ⚠️ Friendly error message when someone without permission tries an admin-only command
+@bot.event
+async def on_command_error(ctx, error):
+    if isinstance(error, commands.MissingPermissions):
+        await ctx.send("🚫 You need **Manage Server** permission to use that command.")
+    elif isinstance(error, commands.MemberNotFound):
+        await ctx.send("⚠️ Couldn't find that member - make sure you @mention them correctly.")
+    elif isinstance(error, commands.MissingRequiredArgument):
+        await ctx.send(f"⚠️ Missing something - check `!help` for how to use this command.")
+    elif isinstance(error, commands.CommandNotFound):
+        pass  # silently ignore unknown commands rather than erroring
+    else:
+        print(f"Unhandled command error: {error}")
+
 
 # 📋 CHRONOLOGICAL FORUM ROUTING FILTER WITH SPAM & DUPLICATE BLOCKING
 @bot.event
@@ -972,7 +1284,7 @@ async def on_message(msg):
 
         if uid not in USER_DATABASE: USER_DATABASE[uid] = {"Opie": 0, "Tray": 0, "Frenchie": 0}
         member, roles_found = msg.author, [r.name for r in msg.author.roles]
-        track_emoji_map = {"Opie": "🏎️", "Tray": "💻", "Frenchie": "🚓"}
+        track_emoji_map = TRACK_EMOJI_MAP
 
         # 🎯 TAG-BASED TRACKING - the point now goes to whoever's NAME is actually mentioned/tagged
         # in the clip's message or title (community edits, highlight clips, etc. all count),
@@ -1010,12 +1322,7 @@ async def on_message(msg):
                 inline=True,
             )
 
-            rank_map = {
-                "Opie": [(500, "Wheelman"), (250, "Getaway Driver"), (100, "Street Racer"), (25, "Grease Monkey")],
-                "Tray": [(500, "Master Hacker"), (250, "Elite Hacker"), (100, "Green Hat"), (25, "Script Kiddie")],
-                "Frenchie": [(500, "Ghost Operator"), (250, "Infiltrator"), (100, "Scout"), (25, "Lookout")]
-            }
-            for milestone, rank_name in rank_map[matched_track]:
+            for milestone, rank_name in RANK_MAP[matched_track]:
                 if track_count >= milestone:
                     if rank_name not in roles_found:
                         role = discord.utils.get(member.guild.roles, name=rank_name)
