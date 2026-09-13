@@ -3,6 +3,7 @@ from dotenv import load_dotenv
 import discord
 from discord.ext import commands, tasks
 import asyncio
+import random
 from datetime import datetime, timezone
 from collections import deque
 import re
@@ -16,8 +17,9 @@ load_dotenv()  # reads variables from a .env file in the same folder, if present
 LOG_ID = 1546911999051694123          # #🛠️┃bot-terminal Logs ID
 WELCOME_CH_ID = 1546898931458379907   # #📜┃rules Channel ID
 LIVE_CH_ID = 1548192164037656607      # ✅ live streams ONLY get posted here
-UPLOAD_CH_IDS = [1546911191568490556, 1547061966520979457]  # ✅ new uploads get posted to BOTH of these
+UPLOAD_CH_IDS = [1547061966520979457]  # ✅ new uploads get posted here only
 LORE_CH_ID = 1547061966520979457      # ✅ your lore/timeline channel - watched for community links AND gets upload alerts
+CLIPS_CH_ID = 1546911191568490556    # ✅ community clip submissions go here - Shorts only (under 2 minutes)
 DAILY_RECAP_CH_ID = 1548174655934824539  # ✅ daily recap summary posts here every 24 hours
 
 # 🔒 HARDWIRED UNIFIED FORUM TIMELINE ENDPOINT
@@ -45,19 +47,29 @@ class TeamPickerView(discord.ui.View):
                 ephemeral=True,
             )
             return
-        role = discord.utils.get(interaction.guild.roles, name=role_name)
+
+        # Fuzzy match: works even if the role name has an emoji, extra spacing, or different casing
+        # added to it (e.g. "🏎️ Opie Fan" or "OPIE FAN" both still match "Opie fan").
+        required_words = role_name.lower().split()  # e.g. ["opie", "fan"]
+        role = None
+        for candidate in interaction.guild.roles:
+            candidate_lower = candidate.name.lower()
+            if all(word in candidate_lower for word in required_words):
+                role = candidate
+                break
+
         if not role:
             await interaction.response.send_message(
-                f"⚠️ The **{role_name}** role doesn't exist on this server yet - ask an admin to create it.",
+                f"⚠️ Couldn't find a role matching **{role_name}** on this server - ask an admin to check the role name.",
                 ephemeral=True,
             )
             return
         member = interaction.user
         if role in member.roles:
-            await interaction.response.send_message(f"You're already a **{role_name}**! ✅", ephemeral=True)
+            await interaction.response.send_message(f"You're already a **{role.name}**! ✅", ephemeral=True)
             return
         await member.add_roles(role)
-        await interaction.response.send_message(f"🎉 You're locked in as a **{role_name}**! Welcome to the crew.", ephemeral=True)
+        await interaction.response.send_message(f"🎉 You're locked in as a **{role.name}**! Welcome to the crew.", ephemeral=True)
 
     @discord.ui.button(label="🏎️ Team Opie", style=discord.ButtonStyle.primary, custom_id="redline_team_opie")
     async def opie_button(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -132,6 +144,31 @@ def reset_daily_stats():
     DAILY_STATS["lives_today"] = []
 
 
+# 📆 WEEKLY RECAP TRACKING - same idea as daily, but resets every 7 days for a bigger wrap-up.
+WEEKLY_STATS = {
+    "clips_submitted": 0,
+    "track_points": {"Opie": 0, "Tray": 0, "Frenchie": 0},
+    "contributor_counts": {},
+    "uploads_this_week": [],
+    "lives_this_week": [],
+}
+
+
+def reset_weekly_stats():
+    WEEKLY_STATS["clips_submitted"] = 0
+    WEEKLY_STATS["track_points"] = {"Opie": 0, "Tray": 0, "Frenchie": 0}
+    WEEKLY_STATS["contributor_counts"] = {}
+    WEEKLY_STATS["uploads_this_week"] = []
+    WEEKLY_STATS["lives_this_week"] = []
+
+
+# 🎉 GLOBAL MILESTONE CELEBRATIONS - fires an immediate special announcement every time the
+# server's ALL-TIME total clip count crosses a round number, instead of waiting for a recap.
+TOTAL_CLIPS_ALL_TIME = 0
+MILESTONE_STEP = 50  # celebrates every 50 total clips: 50, 100, 150, 200...
+LAST_CELEBRATED_MILESTONE = 0
+
+
 def record_recent_activity(streamer_name: str, kind: str, title: str, url: str, date_str: str):
     """Adds an event (upload/live/community-submitted clip) to the in-memory recent activity log."""
     if streamer_name not in RECENT_VIDEOS_LOG:
@@ -147,8 +184,9 @@ def record_recent_activity(streamer_name: str, kind: str, title: str, url: str, 
 def fetch_youtube_video_metadata(video_id: str):
     """
     Calls the official YouTube Data API v3 videos.list endpoint to get reliable
-    metadata for a single video, including its real publish date (snippet.publishedAt)
-    and live broadcast status (liveStreamingDetails / snippet.liveBroadcastContent).
+    metadata for a single video, including its real publish date (snippet.publishedAt),
+    live broadcast status (liveStreamingDetails / snippet.liveBroadcastContent), and
+    its duration (contentDetails.duration, ISO 8601 format e.g. "PT1M30S").
     Returns a dict or None if the lookup fails.
     """
     if not YOUTUBE_API_KEY:
@@ -156,7 +194,7 @@ def fetch_youtube_video_metadata(video_id: str):
         return None
     try:
         params = urllib.parse.urlencode({
-            "part": "snippet,liveStreamingDetails",
+            "part": "snippet,liveStreamingDetails,contentDetails",
             "id": video_id,
             "key": YOUTUBE_API_KEY,
         })
@@ -170,6 +208,20 @@ def fetch_youtube_video_metadata(video_id: str):
     except Exception as e:
         print(f"YouTube Data API video lookup failed: {e}")
         return None
+
+
+def parse_iso8601_duration_to_seconds(duration_str: str):
+    """
+    Converts a YouTube API ISO 8601 duration string (e.g. "PT1M30S", "PT45S", "PT2H")
+    into total seconds. Returns None if it can't be parsed.
+    """
+    if not duration_str:
+        return None
+    match = re.match(r'^PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?$', duration_str)
+    if not match:
+        return None
+    hours, minutes, seconds = (int(g) if g else 0 for g in match.groups())
+    return hours * 3600 + minutes * 60 + seconds
 
 
 def fetch_latest_channel_activity(channel_id: str):
@@ -237,6 +289,7 @@ async def on_ready():
     status_rotator.start()
     youtube_activity_poller.start()
     daily_recap.start()
+    weekly_recap.start()
 
 # 🔄 AUTOMATED LIVE STATUS ROTATOR LOOP
 bot.status_index = 0
@@ -257,6 +310,7 @@ async def status_rotator():
 async def youtube_activity_poller():
     live_ch = bot.get_channel(LIVE_CH_ID)
     upload_channels = [ch for ch in (bot.get_channel(cid) for cid in UPLOAD_CH_IDS) if ch]
+    forum_channel = bot.get_channel(FORUM_CH_ID)
     log_ch = bot.get_channel(LOG_ID)
 
     for streamer_name, channel_ids in STREAMER_YOUTUBE_CHANNELS.items():
@@ -296,12 +350,28 @@ async def youtube_activity_poller():
                     if live_ch:
                         await live_ch.send(content=alert_content, embed=embed)
 
+                    # Also archive it in the forum channel - guarded so the SAME video/live
+                    # never creates a second thread there, even if seen through another path.
+                    if forum_channel and isinstance(forum_channel, discord.ForumChannel) and live_video_id not in PROCESSED_VIDEOS_CACHE:
+                        try:
+                            live_thread_result = await forum_channel.create_thread(
+                                name=f"[LIVE] {streamer_name} | {title[:45]}",
+                                embed=embed,
+                            )
+                            PROCESSED_VIDEOS_CACHE.add(live_video_id)
+                            starter = getattr(live_thread_result, "message", None)
+                            if starter:
+                                await starter.add_reaction("🔴")
+                        except Exception as e:
+                            print(f"Forum thread creation failed for live stream: {e}")
+
                     if log_ch:
                         await log_ch.send(f"📡 **LIVE DETECTED:** {streamer_name} started streaming. `{video_url}`")
 
                     record_recent_activity(streamer_name, "live", title, video_url,
                                             datetime.now(timezone.utc).strftime("%Y-%m-%d"))
-                    DAILY_STATS["lives_today"].append((streamer_name, title, video_url))
+                    DAILY_STATS["lives_today"].append((streamer_name, title, video_url, thumbnail))
+                    WEEKLY_STATS["lives_this_week"].append((streamer_name, title, video_url, thumbnail))
 
             # --- New upload check ---
             if latest_video:
@@ -339,11 +409,27 @@ async def youtube_activity_poller():
                     for target_ch in upload_channels:
                         await target_ch.send(content=streamer_mention or None, embed=embed)
 
+                    # Also archive it in the forum channel - guarded so the SAME video never
+                    # creates a second thread there, even if it was already community-submitted.
+                    if forum_channel and isinstance(forum_channel, discord.ForumChannel) and video_id not in PROCESSED_VIDEOS_CACHE:
+                        try:
+                            upload_thread_result = await forum_channel.create_thread(
+                                name=f"[UPLOAD] {streamer_name} | {title[:45]}",
+                                embed=embed,
+                            )
+                            PROCESSED_VIDEOS_CACHE.add(video_id)
+                            starter = getattr(upload_thread_result, "message", None)
+                            if starter:
+                                await starter.add_reaction("📹")
+                        except Exception as e:
+                            print(f"Forum thread creation failed for upload: {e}")
+
                     if log_ch:
                         await log_ch.send(f"📡 **NEW UPLOAD DETECTED:** {streamer_name} posted a video. `{video_url}`")
 
                     record_recent_activity(streamer_name, "upload", title, video_url, published_at[:10] if published_at != "Unknown" else "Unknown")
-                    DAILY_STATS["uploads_today"].append((streamer_name, title, video_url))
+                    DAILY_STATS["uploads_today"].append((streamer_name, title, video_url, thumbnail))
+                    WEEKLY_STATS["uploads_this_week"].append((streamer_name, title, video_url, thumbnail))
 
 
 @youtube_activity_poller.before_loop
@@ -352,6 +438,30 @@ async def before_youtube_poller():
 
 
 # 📅 DAILY RECAP - posts a summary of the day's activity every 24 hours, then resets the counters.
+RECAP_INTROS = [
+    "🌆 The sun's setting on another day in Redline...",
+    "📼 Rolling the tape back on the last 24 hours...",
+    "🎙️ Tonight's broadcast is ready to roll...",
+    "🌃 Another day, another set of stories logged...",
+    "⚡ Here's what went down today...",
+]
+RECAP_OUTROS = [
+    "🔥 Let's see what tomorrow brings.",
+    "💤 That's a wrap - get some rest, operatives.",
+    "🚦 See you on the streets tomorrow.",
+    "📺 Same time tomorrow. Keep the clips coming.",
+    "🏁 Another lap in the books.",
+]
+RECAP_COLORS = [0x9b59b6, 0xe74c3c, 0x3498db, 0xf1c40f, 0x2ecc71, 0xff6ec7]
+
+
+def make_progress_bar(value: int, total: int, length: int = 12) -> str:
+    if total <= 0:
+        return "░" * length
+    filled = round((value / total) * length)
+    return "█" * filled + "░" * (length - filled)
+
+
 @tasks.loop(hours=24)
 async def daily_recap():
     recap_ch = bot.get_channel(DAILY_RECAP_CH_ID)
@@ -365,44 +475,90 @@ async def daily_recap():
     uploads_today = DAILY_STATS["uploads_today"]
     lives_today = DAILY_STATS["lives_today"]
     contributor_counts = DAILY_STATS["contributor_counts"]
+    total_events = total_clips + len(uploads_today) + len(lives_today)
+
+    intro = random.choice(RECAP_INTROS)
+    outro = random.choice(RECAP_OUTROS)
+    color = random.choice(RECAP_COLORS)
+
+    # Fun "hype grade" based on how much happened today
+    if total_events >= 15:
+        grade, grade_line = "🌟 S-TIER", "Absolutely stacked day. This is what Redline is about."
+    elif total_events >= 8:
+        grade, grade_line = "🔥 A-TIER", "Big day. The archive's getting fat."
+    elif total_events >= 3:
+        grade, grade_line = "✅ B-TIER", "Solid, steady day of activity."
+    elif total_events >= 1:
+        grade, grade_line = "🌱 C-TIER", "Quiet, but something happened."
+    else:
+        grade, grade_line = "😴 REST DAY", "Nothing but tumbleweeds today."
 
     embed = discord.Embed(
-        title="🌙 REDLINE DAILY RECAP",
-        description=f"Here's everything that happened in the last 24 hours, <t:{int(datetime.now(timezone.utc).timestamp())}:R>.",
-        color=0x9b59b6,
+        title="🌙✨ REDLINE DAILY RECAP ✨🌙",
+        description=(
+            f"{intro}\n\n"
+            f"### {grade}\n"
+            f"*{grade_line}*"
+        ),
+        color=color,
     )
 
-    embed.add_field(
-        name="🎬 Clips Submitted",
-        value=(
-            f"**{total_clips}** total clips logged today\n"
-            f"🏎️ Opie: **{track_points['Opie']}** | 💻 Tray: **{track_points['Tray']}** | 🚓 Frenchie: **{track_points['Frenchie']}**"
-        ) if total_clips > 0 else "No clips were submitted today.",
-        inline=False,
-    )
+    if total_clips > 0:
+        max_points = max(track_points.values()) or 1
+        bars = (
+            f"🏎️ Opie     {make_progress_bar(track_points['Opie'], max_points)}  **{track_points['Opie']}**\n"
+            f"💻 Tray     {make_progress_bar(track_points['Tray'], max_points)}  **{track_points['Tray']}**\n"
+            f"🚓 Frenchie {make_progress_bar(track_points['Frenchie'], max_points)}  **{track_points['Frenchie']}**"
+        )
+        embed.add_field(name=f"🎬 {total_clips} Clip{'s' if total_clips != 1 else ''} Logged Today", value=bars, inline=False)
+    else:
+        embed.add_field(name="🎬 Clips Logged Today", value="Nobody submitted a clip today - be the first tomorrow!", inline=False)
 
     if contributor_counts:
         top_uid = max(contributor_counts, key=contributor_counts.get)
         top_user = recap_ch.guild.get_member(top_uid) if recap_ch.guild else None
         top_name = top_user.mention if top_user else f"User {top_uid}"
         embed.add_field(
-            name="👑 Top Contributor Today",
-            value=f"{top_name} with **{contributor_counts[top_uid]}** clip(s) submitted!",
+            name="👑 MVP OF THE DAY",
+            value=f"{top_name} — **{contributor_counts[top_uid]}** clip(s) submitted! Give 'em a round of applause. 👏",
             inline=False,
         )
 
     if lives_today:
-        lives_text = "\n".join(f"🔴 **{name}** — [{title[:60]}]({url})" for name, title, url in lives_today[:5])
-        embed.add_field(name="📡 Live Streams Today", value=lives_text, inline=False)
+        lives_text = "\n".join(f"🔴 **{name}** — [{title[:60]}]({url})" for name, title, url, _ in lives_today[:5])
+        embed.add_field(name=f"📡 {len(lives_today)} Live Stream{'s' if len(lives_today) != 1 else ''} Today", value=lives_text, inline=False)
 
     if uploads_today:
-        uploads_text = "\n".join(f"📹 **{name}** — [{title[:60]}]({url})" for name, title, url in uploads_today[:5])
-        embed.add_field(name="🆕 New Uploads Today", value=uploads_text, inline=False)
+        uploads_text = "\n".join(f"📹 **{name}** — [{title[:60]}]({url})" for name, title, url, _ in uploads_today[:5])
+        embed.add_field(name=f"🆕 {len(uploads_today)} New Upload{'s' if len(uploads_today) != 1 else ''} Today", value=uploads_text, inline=False)
 
-    if not lives_today and not uploads_today and total_clips == 0:
-        embed.add_field(name="😴 Quiet Day", value="Nothing happened today - come back tomorrow!", inline=False)
+    # Spotlight thumbnail - prefers a live stream, falls back to an upload
+    spotlight_thumb = None
+    if lives_today:
+        spotlight_thumb = lives_today[0][3]
+    elif uploads_today:
+        spotlight_thumb = uploads_today[0][3]
+    if spotlight_thumb:
+        embed.set_image(url=spotlight_thumb)
 
-    embed.set_footer(text="New recap posts every 24 hours. Keep the clips coming!")
+    # All-time top 3, for context alongside today's numbers
+    if USER_DATABASE:
+        alltime = sorted(
+            USER_DATABASE.items(),
+            key=lambda kv: kv[1].get("Opie", 0) + kv[1].get("Tray", 0) + kv[1].get("Frenchie", 0),
+            reverse=True,
+        )[:3]
+        alltime = [(uid, total) for uid, data in alltime if (total := data.get("Opie", 0) + data.get("Tray", 0) + data.get("Frenchie", 0)) > 0]
+        if alltime:
+            medals = ["🥇", "🥈", "🥉"]
+            lines = []
+            for i, (uid, total) in enumerate(alltime):
+                u = recap_ch.guild.get_member(uid) if recap_ch.guild else None
+                name = u.mention if u else f"User {uid}"
+                lines.append(f"{medals[i]} {name} — **{total}** all-time clips")
+            embed.add_field(name="🏆 All-Time Leaderboard", value="\n".join(lines), inline=False)
+
+    embed.set_footer(text=f"{outro}  •  New recap in 24 hours")
     await recap_ch.send(embed=embed)
 
     reset_daily_stats()
@@ -410,6 +566,80 @@ async def daily_recap():
 
 @daily_recap.before_loop
 async def before_daily_recap():
+    await bot.wait_until_ready()
+
+
+# 📆 WEEKLY RECAP - a bigger wrap-up every 7 days, with a "Team of the Week" battle result.
+@tasks.loop(hours=168)
+async def weekly_recap():
+    recap_ch = bot.get_channel(DAILY_RECAP_CH_ID)
+    if not recap_ch:
+        print("Weekly recap channel not found - check DAILY_RECAP_CH_ID.")
+        reset_weekly_stats()
+        return
+
+    total_clips = WEEKLY_STATS["clips_submitted"]
+    track_points = WEEKLY_STATS["track_points"]
+    uploads_this_week = WEEKLY_STATS["uploads_this_week"]
+    lives_this_week = WEEKLY_STATS["lives_this_week"]
+    contributor_counts = WEEKLY_STATS["contributor_counts"]
+
+    embed = discord.Embed(
+        title="🏆✨ THE REDLINE WEEKLY WRAP ✨🏆",
+        description="# 7 days. One archive. Let's see who showed up. 🎬",
+        color=0xffd700,
+    )
+
+    # Team of the Week - whichever track earned the most points this week
+    if total_clips > 0:
+        winning_track = max(track_points, key=track_points.get)
+        track_emojis = {"Opie": "🏎️", "Tray": "💻", "Frenchie": "🚓"}
+        max_points = max(track_points.values()) or 1
+        bars = "\n".join(
+            f"{track_emojis[t]} {t:<9} {make_progress_bar(track_points[t], max_points, 14)}  **{track_points[t]}**"
+            for t in ("Opie", "Tray", "Frenchie")
+        )
+        embed.add_field(
+            name=f"👑 TEAM OF THE WEEK: {track_emojis[winning_track]} {winning_track}!",
+            value=bars,
+            inline=False,
+        )
+        embed.add_field(name="🎬 Total Clips This Week", value=f"**{total_clips}** clips archived", inline=False)
+    else:
+        embed.add_field(name="🎬 This Week", value="No clips got submitted this week - let's turn it up! 📈", inline=False)
+
+    if contributor_counts:
+        ranked = sorted(contributor_counts.items(), key=lambda kv: kv[1], reverse=True)[:5]
+        medals = ["🥇", "🥈", "🥉", "4️⃣", "5️⃣"]
+        lines = []
+        for i, (uid, count) in enumerate(ranked):
+            u = recap_ch.guild.get_member(uid) if recap_ch.guild else None
+            name = u.mention if u else f"User {uid}"
+            lines.append(f"{medals[i]} {name} — **{count}** clip(s)")
+        embed.add_field(name="🌟 Top 5 Contributors This Week", value="\n".join(lines), inline=False)
+
+    if lives_this_week:
+        embed.add_field(name="📡 Live Streams This Week", value=f"**{len(lives_this_week)}** stream(s) caught", inline=True)
+    if uploads_this_week:
+        embed.add_field(name="🆕 New Uploads This Week", value=f"**{len(uploads_this_week)}** video(s) caught", inline=True)
+
+    # Spotlight the single biggest moment of the week if there is one
+    spotlight = None
+    if lives_this_week:
+        spotlight = lives_this_week[0]
+    elif uploads_this_week:
+        spotlight = uploads_this_week[0]
+    if spotlight:
+        embed.set_image(url=spotlight[3])
+
+    embed.set_footer(text="🔁 New weekly wrap in 7 days. Let's beat this week's numbers!")
+    await recap_ch.send(content="@here", embed=embed)
+
+    reset_weekly_stats()
+
+
+@weekly_recap.before_loop
+async def before_weekly_recap():
     await bot.wait_until_ready()
 
 
@@ -422,27 +652,31 @@ async def on_member_join(member):
     welcome_ch = bot.get_channel(WELCOME_CH_ID)
     if welcome_ch:
         embed = discord.Embed(
-            title="🏁 WELCOME TO THE REDLINE MATRIX TRACKER 🏁",
+            title="🏁💥 WELCOME TO REDLINE 💥🏁",
             description=(
-                f"{member.mention} just joined the network!\n\n"
-                "Welcome to the ultimate multi-POV roleplay tracking network!\n\n"
-                "📌 **SERVER REQUISITE GUIDELINES:**\n"
-                "1. **Keep Timelines Accurate:** Do not post fake timestamps or spoilers.\n"
-                "2. **Respect the Streamers:** Toxicity or hate speech results in an instant ban.\n"
-                "3. **Separate IC from OOC:** Keep real-world drama completely out of this server.\n"
-                "4. **Follow Discord ToS:** No illegal links or malicious behavior.\n\n"
-                "🏆 **PROGRESSION MILESTONE MARGINS:**\n"
-                "• Opie Track: Grease Monkey ➔ Street Racer ➔ Getaway Driver ➔ Wheelman\n"
-                "• Tray Track: Script Kiddie ➔ Green Hat ➔ Elite Hacker ➔ Master Hacker\n"
-                "• Frenchie Track: Lookout ➔ Scout ➔ Infiltrator ➔ Ghost Operator\n\n"
-                "📊 **UTILITY COMMAND PANEL:**\n"
-                "• Type `!help` anywhere for a full rundown of everything the bot does.\n"
-                "• Type `!stats` anywhere to view your personal scoreboard!\n\n"
-                "👇 **Pick your team right now with one click below:**"
+                f"# {member.mention} has entered the network!\n\n"
+                "You just joined one of the most active multi-POV roleplay tracking servers running. "
+                "Live streams, uploads, and community clips all get caught automatically and archived "
+                "forever. Here's the rundown:\n\n"
+                "📌 **THE RULES**\n"
+                "1️⃣ Keep timelines accurate — no fake timestamps or spoilers\n"
+                "2️⃣ Respect the streamers — zero tolerance for toxicity\n"
+                "3️⃣ Keep IC and OOC completely separate\n"
+                "4️⃣ Follow Discord ToS — no illegal links, no malicious behavior\n\n"
+                "🏆 **CLIMB THE RANKS**\n"
+                "🏎️ Opie: Grease Monkey ➔ Street Racer ➔ Getaway Driver ➔ **Wheelman**\n"
+                "💻 Tray: Script Kiddie ➔ Green Hat ➔ Elite Hacker ➔ **Master Hacker**\n"
+                "🚓 Frenchie: Lookout ➔ Scout ➔ Infiltrator ➔ **Ghost Operator**\n\n"
+                "📊 **COMMANDS**\n"
+                "`!help` — full guide to everything the bot does\n"
+                "`!stats` — your personal scoreboard\n"
+                "`!stats leaderboard` — see who's on top\n\n"
+                "🌙 A **Daily Recap** and 🏆 a **Weekly Wrap** post automatically so you never miss what happened.\n\n"
+                "👇 **Lock in your team right now — one click:**"
             ),
             color=0xff0000
         )
-        embed.set_footer(text=f"Redline Operative #{len(member.guild.members)} | Grid Sync Active")
+        embed.set_footer(text=f"Redline Operative #{len(member.guild.members)} | Grid Sync Active 🟢")
         await welcome_ch.send(embed=embed, view=TeamPickerView())
 
     # 📬 PERSONAL DM WELCOME - a more personal touch alongside the public channel post
@@ -471,24 +705,35 @@ async def stats(ctx, *, option: str = None):
         if not USER_DATABASE:
             await ctx.send("📊 **Scoreboard Empty:** No clips have been logged in the archive yet!")
             return
-            
+
         leaderboard_data = []
         for uid, data in USER_DATABASE.items():
             total_clips = data.get("Opie", 0) + data.get("Tray", 0) + data.get("Frenchie", 0)
+            if total_clips == 0:
+                continue
             user_obj = ctx.guild.get_member(uid) or await bot.fetch_user(uid)
             user_name = user_obj.name if user_obj else f"User {uid}"
-            leaderboard_data.append((user_name, total_clips, data.get("Opie", 0), data.get("Tray", 0), data.get("Frenchie", 0)))
-            
-        leaderboard_data.sort(key=lambda x: x, reverse=True)
-        
-        embed = discord.Embed(title="🏆 REDLINE OVERALL CLIPS LEADERBOARD 🏆", description="The server's top verified chronological timeline contributors.", color=0xd4af37)
-        for i, (name, total, opie_pts, tray_pts, frenchie_pts) in enumerate(leaderboard_data[:5], 1):
+            leaderboard_data.append((total_clips, user_name, data.get("Opie", 0), data.get("Tray", 0), data.get("Frenchie", 0)))
+
+        if not leaderboard_data:
+            await ctx.send("📊 **Scoreboard Empty:** No clips have been logged in the archive yet!")
+            return
+
+        leaderboard_data.sort(key=lambda x: x[0], reverse=True)  # sort by total clips, highest first
+
+        medals = ["🥇", "🥈", "🥉", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟"]
+        embed = discord.Embed(
+            title="🏆 REDLINE ALL-TIME LEADERBOARD 🏆",
+            description=f"The top {min(10, len(leaderboard_data))} chronological timeline contributors, out of **{len(leaderboard_data)}** total.",
+            color=0xd4af37,
+        )
+        for i, (total, name, opie_pts, tray_pts, frenchie_pts) in enumerate(leaderboard_data[:10]):
             embed.add_field(
-                name=f"🥇 Rank #{i} | {name}", 
-                value=f"Total Submissions: **{total}**\n🏎️ Opie: *{opie_pts}* | 💻 Tray: *{tray_pts}* | 🚓 Frenchie: *{frenchie_pts}*", 
+                name=f"{medals[i]} {name} — {total} clips",
+                value=f"🏎️ Opie: *{opie_pts}* | 💻 Tray: *{tray_pts}* | 🚓 Frenchie: *{frenchie_pts}*",
                 inline=False
             )
-        embed.set_footer(text="Keep submitting clips to claim the top rank position on the dashboard!")
+        embed.set_footer(text="Keep submitting clips to climb the ranks!")
         await ctx.send(embed=embed)
         return
 
@@ -568,9 +813,9 @@ async def help(ctx):
             "Every clip you submit earns 1 point toward whichever streamer's channel the video "
             "actually came from - not your own Discord roles. Hit these milestones on a track to "
             "automatically get promoted (a role gets assigned and an announcement posts):\n\n"
-            "**Opie Track:** Grease Monkey (10) ➔ Street Racer (40) ➔ Getaway Driver (60) ➔ Wheelman (90)\n"
-            "**Tray Track:** Script Kiddie (10) ➔ Green Hat (40) ➔ Elite Hacker (60) ➔ Master Hacker (90)\n"
-            "**Frenchie Track:** Lookout (10) ➔ Scout (40) ➔ Infiltrator (60) ➔ Ghost Operator (90)"
+            "**Opie Track:** Grease Monkey (25) ➔ Street Racer (100) ➔ Getaway Driver (250) ➔ Wheelman (500)\n"
+            "**Tray Track:** Script Kiddie (25) ➔ Green Hat (100) ➔ Elite Hacker (250) ➔ Master Hacker (500)\n"
+            "**Frenchie Track:** Lookout (25) ➔ Scout (100) ➔ Infiltrator (250) ➔ Ghost Operator (500)"
         ),
         inline=False,
     )
@@ -584,6 +829,21 @@ async def help(ctx):
             "Each streamer can have more than one channel tracked (e.g. their main channel plus a clips/extras channel) - "
             "activity from any of them gets caught."
         ),
+        inline=False,
+    )
+    ranks_embed.add_field(
+        name="🌙 Daily Recap & 🏆 Weekly Wrap",
+        value=(
+            "Every 24 hours, a **Daily Recap** posts automatically with the day's clips, an MVP shoutout, "
+            "and any live streams/uploads caught that day.\n\n"
+            "Every 7 days, a bigger **Weekly Wrap** posts with a Team of the Week battle, top 5 contributors, "
+            "and a spotlight on the week's biggest moment."
+        ),
+        inline=False,
+    )
+    ranks_embed.add_field(
+        name="🎉 Milestone Celebrations",
+        value="Every time the server's all-time clip count hits a round number, a special @here announcement fires immediately - keep an eye out!",
         inline=False,
     )
     ranks_embed.add_field(
@@ -607,7 +867,7 @@ async def on_message(msg):
     content_lower = msg.content.lower()
     
     yt_match = re.search(r'(https?://(?:www\.)?(?:youtube\.com/watch\?v=|youtu\.be/)([a-zA-Z0-9_-]{11}))', msg.content)
-    if yt_match and msg.channel.id == LORE_CH_ID:
+    if yt_match and msg.channel.id in (LORE_CH_ID, CLIPS_CH_ID):
         video_url = yt_match.group(1)
         video_id = yt_match.group(2)
         uid = msg.author.id
@@ -620,17 +880,18 @@ async def on_message(msg):
             return
         SPAM_COOLDOWN[uid] = current_time
 
-        # 🧠 ANTI-DUPLICATE BLOCK
+        # 🧠 ANTI-DUPLICATE BLOCK - still stops a repost from earning a point or creating a new thread,
+        # but no longer deletes the message or treats it like a violation.
         if video_id in PROCESSED_VIDEOS_CACHE:
-            try: await msg.delete()
-            except: pass
-            await msg.channel.send(f"❌ {msg.author.mention} **Submission Blocked:** That specific video clip is already logged in the archive tracker dashboard!", delete_after=10)
-            
+            await msg.channel.send(f"👀 {msg.author.mention} heads up, this one's already logged in the archive - no new thread or point for a repeat!", delete_after=10)
+
             log_ch = bot.get_channel(LOG_ID)
             if log_ch:
-                await log_ch.send(f"⚠️ **DUPLICATE INTERCEPTED:** {msg.author.mention} attempted to submit a duplicate link. Video ID: `{video_id}`. Message deleted automatically.")
+                await log_ch.send(f"ℹ️ **DUPLICATE NOTED:** {msg.author.mention} reposted an already-logged video. Video ID: `{video_id}`. Message left as-is.")
             return
-        PROCESSED_VIDEOS_CACHE.add(video_id)
+        # NOTE: video_id only gets added to PROCESSED_VIDEOS_CACHE further down, AFTER the
+        # Shorts-length gate passes - so a video rejected for being too long there can still
+        # legitimately be posted in the lore channel afterward.
 
         # 📡 BROWSER-SPOOF DATA ENGINE LOOKUP - FETCH REAL YOUTUBE TITLE & PICTURE THUMBNAIL
         actual_video_title = "Unknown Clip Entry Description"
@@ -670,6 +931,28 @@ async def on_message(msg):
         else:
             print("YouTube Data API lookup returned no metadata - falling back to Discord post date.")
 
+        # ✂️ SHORTS-ONLY CHANNEL GATE - this channel only earns a point/thread for videos
+        # under 2 minutes long. Longer videos posted here get skipped (message stays, no delete).
+        if msg.channel.id == CLIPS_CH_ID:
+            duration_str = video_metadata.get("contentDetails", {}).get("duration") if video_metadata else None
+            duration_seconds = parse_iso8601_duration_to_seconds(duration_str)
+            if duration_seconds is None:
+                await msg.channel.send(
+                    f"⚠️ {msg.author.mention} couldn't verify this video's length, so it wasn't counted here. Try again in a moment.",
+                    delete_after=10,
+                )
+                return
+            if duration_seconds > 120:
+                await msg.channel.send(
+                    f"✂️ {msg.author.mention} this channel is for **Shorts only** (under 2 minutes) - this one's too long to count here. Post full-length clips in the lore channel instead!",
+                    delete_after=10,
+                )
+                return
+
+        # Video has cleared all gates (duplicate check + Shorts-length gate if applicable) -
+        # NOW it's safe to mark it as processed so it can't be double-counted elsewhere.
+        PROCESSED_VIDEOS_CACHE.add(video_id)
+
         # 🤖 AI NATURAL LANGUAGE NLP ENGINE: Scans full text to auto-tag matching active players based on keywords
         detected_player_tags = []
         for player_key, discord_ping_string in PLAYERS_DATABASE.items():
@@ -691,19 +974,21 @@ async def on_message(msg):
         member, roles_found = msg.author, [r.name for r in msg.author.roles]
         track_emoji_map = {"Opie": "🏎️", "Tray": "💻", "Frenchie": "🚓"}
 
-        # 🎯 VIDEO-SOURCE TRACKING - the point goes to whichever streamer's own YouTube
-        # channel this video actually came from, regardless of the poster's own roles.
-        matched_track = CHANNEL_ID_TO_STREAMER.get(source_channel_id) if source_channel_id else None
+        # 🎯 TAG-BASED TRACKING - the point now goes to whoever's NAME is actually mentioned/tagged
+        # in the clip's message or title (community edits, highlight clips, etc. all count),
+        # regardless of which YouTube channel actually uploaded the video.
+        matched_track = None
+        if "opie" in combined_metadata_text:
+            matched_track = "Opie"
+        elif "tray" in combined_metadata_text:
+            matched_track = "Tray"
+        elif "frenchie" in combined_metadata_text:
+            matched_track = "Frenchie"
 
-        # Fallback if the API lookup didn't return a channel ID for some reason:
-        # guess from keywords in the message/title so a submission still gets credited.
-        if not matched_track:
-            if "opie" in combined_metadata_text:
-                matched_track = "Opie"
-            elif "tray" in combined_metadata_text:
-                matched_track = "Tray"
-            elif "frenchie" in combined_metadata_text:
-                matched_track = "Frenchie"
+        # Fallback ONLY if nobody's name was actually mentioned anywhere: credit whoever's own
+        # channel the video came from, so a plain reupload with no caption still counts for someone.
+        if not matched_track and source_channel_id:
+            matched_track = CHANNEL_ID_TO_STREAMER.get(source_channel_id)
 
         if matched_track:
             USER_DATABASE[uid][matched_track] += 1
@@ -726,9 +1011,9 @@ async def on_message(msg):
             )
 
             rank_map = {
-                "Opie": [(90, "Wheelman"), (60, "Getaway Driver"), (40, "Street Racer"), (10, "Grease Monkey")],
-                "Tray": [(90, "Master Hacker"), (60, "Elite Hacker"), (40, "Green Hat"), (10, "Script Kiddie")],
-                "Frenchie": [(90, "Ghost Operator"), (60, "Infiltrator"), (40, "Scout"), (10, "Lookout")]
+                "Opie": [(500, "Wheelman"), (250, "Getaway Driver"), (100, "Street Racer"), (25, "Grease Monkey")],
+                "Tray": [(500, "Master Hacker"), (250, "Elite Hacker"), (100, "Green Hat"), (25, "Script Kiddie")],
+                "Frenchie": [(500, "Ghost Operator"), (250, "Infiltrator"), (100, "Scout"), (25, "Lookout")]
             }
             for milestone, rank_name in rank_map[matched_track]:
                 if track_count >= milestone:
@@ -749,9 +1034,17 @@ async def on_message(msg):
 
             clean_streamer_name = matched_track if matched_track else "Unknown"
             thread_title = f"[{thread_date_prefix}] {clean_streamer_name} | {actual_video_title[:45]}"
-            
-            await forum_channel.create_thread(name=thread_title, embed=user_embed, applied_tags=applied_tags)
-            
+
+            thread_result = await forum_channel.create_thread(name=thread_title, embed=user_embed, applied_tags=applied_tags)
+
+            # 🔥 Auto-react on the new thread's starter message so the archive feels alive
+            try:
+                starter_message = thread_result.message if hasattr(thread_result, "message") else None
+                if starter_message:
+                    await starter_message.add_reaction("🔥")
+            except Exception as e:
+                print(f"Auto-react on new thread failed: {e}")
+
             log_ch = bot.get_channel(LOG_ID)
             if log_ch:
                 await log_ch.send(f"✅ **CHRONO CARD ACTIVE:** Successfully created archive thread: `{thread_title}` for member {msg.author.mention}. AI tags parsed.")
@@ -760,9 +1053,28 @@ async def on_message(msg):
                 record_recent_activity(matched_track, "community_clip", actual_video_title, video_url, youtube_upload_date_string)
 
             DAILY_STATS["clips_submitted"] += 1
+            WEEKLY_STATS["clips_submitted"] += 1
             if matched_track:
                 DAILY_STATS["track_points"][matched_track] += 1
+                WEEKLY_STATS["track_points"][matched_track] += 1
             DAILY_STATS["contributor_counts"][uid] = DAILY_STATS["contributor_counts"].get(uid, 0) + 1
+            WEEKLY_STATS["contributor_counts"][uid] = WEEKLY_STATS["contributor_counts"].get(uid, 0) + 1
+
+            # 🎉 Check for a global milestone the moment it's crossed
+            global TOTAL_CLIPS_ALL_TIME, LAST_CELEBRATED_MILESTONE
+            TOTAL_CLIPS_ALL_TIME += 1
+            if TOTAL_CLIPS_ALL_TIME // MILESTONE_STEP > LAST_CELEBRATED_MILESTONE // MILESTONE_STEP:
+                LAST_CELEBRATED_MILESTONE = TOTAL_CLIPS_ALL_TIME
+                milestone_number = (TOTAL_CLIPS_ALL_TIME // MILESTONE_STEP) * MILESTONE_STEP
+                recap_ch = bot.get_channel(DAILY_RECAP_CH_ID)
+                if recap_ch:
+                    milestone_embed = discord.Embed(
+                        title="🎉🚨 MILESTONE UNLOCKED 🚨🎉",
+                        description=f"# {milestone_number} CLIPS ARCHIVED!\nThe Redline archive just hit a huge milestone. Massive shoutout to everyone keeping the timeline alive. 🏁",
+                        color=0xffd700,
+                    )
+                    milestone_embed.set_footer(text="Every clip counts. Keep them coming!")
+                    await recap_ch.send(content="@here", embed=milestone_embed)
 
     await bot.process_commands(msg)
 
