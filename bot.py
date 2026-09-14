@@ -1436,7 +1436,7 @@ async def on_message(msg):
             applied_tags = [
                 t for t in forum_channel.available_tags
                 if t.name == target_tag_name or t.name == target_year_tag_name
-                or (matched_track and t.name == f"{track_emoji_map[matched_track]} {matched_track}")
+                or (matched_track and matched_track.lower() in t.name.lower())
             ]
 
             clean_streamer_name = matched_track if matched_track else "Unknown"
