@@ -17,12 +17,14 @@ load_dotenv()  # reads variables from a .env file in the same folder, if present
 
 # 📡 PRODUCTION CHANNEL ID MATRIX - HARDWIRED ROUTING
 LOG_ID = 1546911999051694123          # #🛠️┃bot-terminal Logs ID
-WELCOME_CH_ID = 1546898931458379907   # #📜┃rules Channel ID
+WELCOME_CH_ID = 1546908252250443917   # ✅ welcome messages post in #general chat
 LIVE_CH_ID = 1548192164037656607      # ✅ live streams ONLY get posted here
 UPLOAD_CH_IDS = [1547061966520979457]  # ✅ new uploads get posted here only
 LORE_CH_ID = 1547061966520979457      # ✅ your lore/timeline channel - watched for community links AND gets upload alerts
 CLIPS_CH_ID = 1546911191568490556    # ✅ community clip submissions go here - Shorts only (under 2 minutes)
 DAILY_RECAP_CH_ID = 1548174655934824539  # ✅ daily recap summary posts here every 24 hours
+GET_ROLES_CH_ID = 1546895557715562567    # ✅ requests posted here get DM'd to everyone with the Recruiter role
+RULES_CH_ID = 1546898931458379907        # ✅ #📜┃rules channel - where !postrules posts the pinnable highlights
 
 # 🔒 HARDWIRED UNIFIED FORUM TIMELINE ENDPOINT
 FORUM_CH_ID = 1547336797724479519     # Your #📋┃timeline-archive ID
@@ -494,6 +496,50 @@ def _get_poster_font(size: int, bold: bool = True):
     return ImageFont.load_default()
 
 
+# 🎬 ANIMATED WELCOME BANNER - pulsing color, scrolling checkered flag stripes, auto-loops in Discord.
+BANNER_COLOR_CYCLE = [(255, 60, 60), (60, 120, 255), (60, 220, 120), (255, 215, 0)]  # red/blue/green/gold
+
+
+def generate_welcome_banner() -> io.BytesIO:
+    import math
+    W, H = 700, 220
+    n_frames = 24
+    frames = []
+    font_big = _get_poster_font(54)
+
+    for i in range(n_frames):
+        frame = Image.new("RGB", (W, H), (10, 10, 15))
+        draw = ImageDraw.Draw(frame)
+
+        offset = (i * 14) % 40
+        check_size = 20
+        for y_base in [0, H - check_size]:
+            for x in range(-40, W + 40, check_size):
+                xpos = x + offset
+                col_index = ((xpos // check_size) + (0 if y_base == 0 else 1)) % 2
+                color = (255, 255, 255) if col_index == 0 else (20, 20, 20)
+                draw.rectangle([xpos, y_base, xpos + check_size, y_base + check_size], fill=color)
+
+        t = i / n_frames
+        color_idx = int(t * len(BANNER_COLOR_CYCLE)) % len(BANNER_COLOR_CYCLE)
+        next_idx = (color_idx + 1) % len(BANNER_COLOR_CYCLE)
+        blend = (t * len(BANNER_COLOR_CYCLE)) % 1
+        c1, c2 = BANNER_COLOR_CYCLE[color_idx], BANNER_COLOR_CYCLE[next_idx]
+        glow_color = tuple(int(c1[j] + (c2[j] - c1[j]) * blend) for j in range(3))
+
+        text = "WELCOME TO REDLINE"
+        tw = draw.textlength(text, font=font_big)
+        y_bob = 90 + int(4 * math.sin(t * 2 * math.pi))
+        draw.text(((W - tw) / 2, y_bob), text, font=font_big, fill=glow_color)
+
+        frames.append(frame)
+
+    buffer = io.BytesIO()
+    frames[0].save(buffer, format="GIF", save_all=True, append_images=frames[1:], duration=80, loop=0)
+    buffer.seek(0)
+    return buffer
+
+
 def generate_wanted_poster(avatar_bytes: bytes, display_name: str) -> io.BytesIO:
     """Builds a wanted-poster PNG with the given avatar image and name, returns it as an in-memory buffer."""
     W, H = 600, 800
@@ -739,18 +785,18 @@ async def on_member_join(member):
 
     welcome_ch = bot.get_channel(WELCOME_CH_ID)
     if welcome_ch:
+        banner_buffer = generate_welcome_banner()
+        banner_file = discord.File(fp=banner_buffer, filename="welcome_banner.gif")
+
         embed = discord.Embed(
             title="🏁💥 WELCOME TO REDLINE 💥🏁",
             description=(
-                f"# {member.mention} has entered the network!\n\n"
-                "You just joined one of the most active multi-POV roleplay tracking servers running. "
-                "Live streams, uploads, and community clips all get caught automatically and archived "
-                "forever. Here's the rundown:\n\n"
-                "📌 **THE RULES**\n"
-                "1️⃣ Keep timelines accurate — no fake timestamps or spoilers\n"
-                "2️⃣ Respect the streamers — zero tolerance for toxicity\n"
-                "3️⃣ Keep IC and OOC completely separate\n"
-                "4️⃣ Follow Discord ToS — no illegal links, no malicious behavior\n\n"
+                f"# 🚨 {member.mention} JUST ENTERED THE NETWORK 🚨\n\n"
+                "**You just joined one of the most active multi-POV roleplay tracking servers running.**\n"
+                "Live streams, uploads, and community clips all get caught automatically and archived forever. "
+                "Milestone celebrations fire off server-wide. Daily and weekly recaps drop like clockwork. "
+                "This place doesn't sleep. 🌆\n\n"
+                f"📌 Make sure to check out <#{RULES_CH_ID}> before diving in.\n\n"
                 "🏆 **CLIMB THE RANKS**\n"
                 "🏎️ Opie: Grease Monkey ➔ Street Racer ➔ Getaway Driver ➔ **Wheelman**\n"
                 "💻 Tray: Script Kiddie ➔ Green Hat ➔ Elite Hacker ➔ **Master Hacker**\n"
@@ -758,14 +804,16 @@ async def on_member_join(member):
                 "📊 **COMMANDS**\n"
                 "`!help` — full guide to everything the bot does\n"
                 "`!stats` — your personal scoreboard\n"
-                "`!stats leaderboard` — see who's on top\n\n"
+                "`!wanted` — get your own wanted poster made 🤠\n"
+                "`!scanner` — police radio chatter for the vibes 📻\n\n"
                 "🌙 A **Daily Recap** and 🏆 a **Weekly Wrap** post automatically so you never miss what happened.\n\n"
-                "👇 **Lock in your team right now — one click:**"
+                "# 👇 LOCK IN YOUR TEAM RIGHT NOW 👇"
             ),
-            color=0xff0000
+            color=random.choice([0xff3c3c, 0x3c78ff, 0x3cdc78, 0xffd700])
         )
+        embed.set_image(url="attachment://welcome_banner.gif")
         embed.set_footer(text=f"Redline Operative #{len(member.guild.members)} | Grid Sync Active 🟢")
-        await welcome_ch.send(embed=embed, view=TeamPickerView())
+        await welcome_ch.send(embed=embed, file=banner_file, view=TeamPickerView())
 
     # 📬 PERSONAL DM WELCOME - a more personal touch alongside the public channel post
     try:
@@ -946,6 +994,11 @@ async def help(ctx):
     ranks_embed.add_field(
         name="💰 Heist Announcements (staff only)",
         value="Staff can run `!heist [description]` to post a stylized heist-in-progress announcement with an @here ping.",
+        inline=False,
+    )
+    ranks_embed.add_field(
+        name="📌 Rule Highlights (staff only)",
+        value="Staff can run `!postrules` in the rules channel to post the pinnable rule highlights message.",
         inline=False,
     )
     ranks_embed.add_field(
@@ -1157,6 +1210,29 @@ async def heist(ctx, *, description: str = "A heist is going down RIGHT NOW."):
     await ctx.send(content="@here", embed=embed)
 
 
+# 📌 !postrules - posts the rule highlights to the rules channel ONCE, for staff to pin manually.
+# This does NOT run automatically - it's a one-time command so the rules channel doesn't get spammed.
+@bot.command()
+@commands.has_permissions(manage_guild=True)
+async def postrules(ctx):
+    embed = discord.Embed(
+        title="📌 RULE HIGHLIGHTS",
+        description=(
+            f"*(full rules pinned in <#{RULES_CH_ID}>)*\n\n"
+            "1️⃣ No RDM, VDM, powergaming, metagaming, or NVL\n"
+            "2️⃣ Zero tolerance for racism, slurs, or toxicity toward anyone\n"
+            "3️⃣ Never speak OOC in-character — all reports go through the ticket system\n"
+            "4️⃣ No external tools, scripts, macros, or mods to exploit mechanics or track players\n"
+            "5️⃣ Quality mic required, no external/copyrighted music\n"
+            "6️⃣ Follow Discord ToS — no illegal links, no malicious behavior"
+        ),
+        color=0xff3c3c,
+    )
+    embed.set_footer(text="Pin this message so it stays at the top of the channel.")
+    sent_message = await ctx.send(embed=embed)
+    await ctx.send(f"✅ Posted. Pin it here: {sent_message.jump_url}", delete_after=15)
+
+
 # ⚠️ Friendly error message when someone without permission tries an admin-only command
 @bot.event
 async def on_command_error(ctx, error):
@@ -1177,7 +1253,31 @@ async def on_command_error(ctx, error):
 async def on_message(msg):
     if msg.author.bot: return
     content_lower = msg.content.lower()
-    
+
+    # 📨 GET-ROLES REQUEST FORWARDER - anything typed in this channel gets DM'd to every
+    # member holding a role matching "Recruiter" (fuzzy-matched, so emoji/formatting is fine).
+    if msg.channel.id == GET_ROLES_CH_ID:
+        recruiter_roles = [r for r in msg.guild.roles if "recruiter" in r.name.lower()]
+        recruiters = {member for role in recruiter_roles for member in role.members}
+        if recruiters:
+            request_embed = discord.Embed(
+                title="📨 New Role Request",
+                description=msg.content or "*(no text - attachment or embed only)*",
+                color=0x3498db,
+            )
+            request_embed.add_field(name="👤 From", value=f"{msg.author.mention} ({msg.author.name})", inline=True)
+            request_embed.add_field(name="📍 Channel", value=msg.channel.mention, inline=True)
+            request_embed.add_field(name="🔗 Jump to message", value=f"[Click here]({msg.jump_url})", inline=False)
+            request_embed.set_footer(text="Sent because you have a Recruiter role")
+
+            for recruiter in recruiters:
+                try:
+                    await recruiter.send(embed=request_embed)
+                except discord.Forbidden:
+                    pass  # that recruiter has DMs disabled - skip silently
+        # Note: intentionally NOT returning here, so this channel can still work
+        # normally for anything else (e.g. if it also has YouTube links watched elsewhere).
+
     yt_match = re.search(r'(https?://(?:www\.)?(?:youtube\.com/watch\?v=|youtu\.be/)([a-zA-Z0-9_-]{11}))', msg.content)
     if yt_match and msg.channel.id in (LORE_CH_ID, CLIPS_CH_ID):
         video_url = yt_match.group(1)
