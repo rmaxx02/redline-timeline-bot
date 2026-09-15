@@ -8,4 +8,4 @@ The bot also queries the public YouTube Data API to check for public video/live-
 
 Users may request their data be removed by contacting server staff.
 
-Contact: [your email]
+Contact: [Rmaxx2003@gmail.com]
